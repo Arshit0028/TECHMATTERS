@@ -696,7 +696,7 @@ const ReportDetail: React.FC<{
       .then(res => { if (res.data?._id) setReport(res.data); })
       .catch(err => console.error('Failed to load full report:', err))
       .finally(() => setLoadingActivities(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  
   }, [initialReport._id]);
 
   useEffect(() => {
@@ -1202,7 +1202,7 @@ export const AdminReportReview: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  
   }, [month, year]);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
@@ -1248,7 +1248,7 @@ export const AdminReportReview: React.FC = () => {
     const safe = normalise(updated);
     setReports(prev => prev.map(r => r._id === safe._id ? safe : r));
     setSelected(safe);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  
   }, []);
 
   const filtered = reports.filter(r => {
