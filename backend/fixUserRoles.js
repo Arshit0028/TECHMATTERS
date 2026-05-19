@@ -6,9 +6,9 @@ async function fixRoles() {
   await mongoose.connect(process.env.MONGO_URI);
   const result = await User.updateMany(
     { accessLevel: { $exists: false } },
-    { $set: { accessLevel: "entry" } },
+    { $set: { accessLevel: "super-admin" } },
   );
-  console.log(`✅ Updated ${result.modifiedCount} users with 'entry' role.`);
+  console.log(`✅ Updated ${result.modifiedCount} users with role.`);
   process.exit();
 }
 fixRoles();

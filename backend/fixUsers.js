@@ -8,7 +8,7 @@ async function fix() {
   // Update by email – CHANGE THIS EMAIL TO YOURS
   const result = await User.updateOne(
     { email: "admin@techmatters.com" }, // ❗ CHANGE THIS
-    { $set: { accessLevel: "entry" } },
+    { $set: { accessLevel: "super-admin" } },
   );
 
   console.log(
