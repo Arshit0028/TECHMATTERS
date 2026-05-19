@@ -18,53 +18,52 @@ interface TaskEntry {
   _id: string;
   taskRef?: string | { _id: string; title: string; status: string; priority: string };
   title: string;
-  /** Live status from TaskList (Done / In Progress / Review / To Do) */
-  status?: string;
+  status?: string | null;
   isDone: boolean;
   doneNote: string;
   undoneNote: string;
   assignedBy?: { name: string } | null;
   project?: { name: string } | null;
-  dueDate?: string;
-  startDate?: string;
-  endDate?: string;
-  priority?: string;
+  dueDate?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  priority?: string | null;
 }
 interface NextMonthTask {
   title: string;
   priority: 'Low' | 'Medium' | 'High';
   notes: string;
-  projectName?: string;
-  assigneeName?: string;
-  activityType?: string;
-  startDate?: string;
-  endDate?: string;
+  projectName?: string | null;
+  assigneeName?: string | null;
+  activityType?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
 }
 interface NextMonthActivity {
   name: string;
   activityType: string;
   priority: 'Low' | 'Medium' | 'High';
-  startDate?: string;
-  endDate?: string;
-  notes?: string;
-  projectName?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  notes?: string | null;
+  projectName?: string | null;
 }
 interface Reimbursement {
   _id: string;
   title: string;
   amount: number;
   status: string;
-  expenseDate?: string;
+  expenseDate?: string | null;
 }
 interface ActivityItem {
   _id: string;
   name: string;
-  description?: string;
+  description?: string | null;
   status: 'Pending' | 'In Progress' | 'Completed';
   activityType: string;
   priority: string;
-  startDate?: string;
-  endDate?: string;
+  startDate?: string | null;
+  endDate?: string | null;
   task?: { title: string } | null;
   project?: { name: string } | null;
 }
@@ -81,12 +80,12 @@ interface MonthlyReport {
   nextMonthFreeText: string;
   reimbursements: Reimbursement[];
   activities?: ActivityItem[];
-  submittedAt?: string;
-  managerRemarks?: string;
-  adminRemarks?: string;
-  adminScore?: number;
-  rejectionNote?: string;
-  lastMonthNote?: { accomplishments: string; challenges: string; learnings: string };
+  submittedAt?: string | null;
+  managerRemarks?: string | null;
+  adminRemarks?: string | null;
+  adminScore?: number | null;
+  rejectionNote?: string | null;
+  lastMonthNote?: { accomplishments: string; challenges: string; learnings: string } | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -113,27 +112,28 @@ const AVATAR_GRADS = [
   'linear-gradient(135deg,#7c3aed,#ec4899)',
 ];
 
+// ─── Safe string helpers ──────────────────────────────────────────────────────
+/** Safely extract a name from any nullable object */
+const safeName = (obj: { name?: string | null } | null | undefined, fallback = '—'): string =>
+  obj?.name?.trim() || fallback;
+
 const initials = (n?: string | null): string => {
   if (!n || typeof n !== 'string') return 'NA';
-  return n
-    .split(' ')
-    .filter(Boolean)
-    .map(w => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase() || 'NA';
+  return n.split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'NA';
 };
 
 const fmt = (d?: string | null): string =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
-// Derive done state from either the boolean field or the live status string
+/** Derive done-state safely */
 const taskIsDone = (t: TaskEntry): boolean =>
-  t.isDone || t.status === 'Done' || t.status === 'done' || t.status === 'Completed' || t.status === 'completed';
+  t.isDone ||
+  t.status === 'Done' || t.status === 'done' ||
+  t.status === 'Completed' || t.status === 'completed';
 
-// Safe employee name helper
-const empName  = (r: MonthlyReport): string => r.employee?.name  || 'Unknown Employee';
-const empEmail = (r: MonthlyReport): string => r.employee?.email || '—';
+/** Safe employee accessors — never throw on null employee */
+const empName  = (r: MonthlyReport): string => r.employee?.name?.trim()  || 'Unknown Employee';
+const empEmail = (r: MonthlyReport): string => r.employee?.email?.trim() || '—';
 
 // ─── PDF: Individual Employee ─────────────────────────────────────────────────
 const downloadEmployeePDF = async (report: MonthlyReport) => {
@@ -194,7 +194,7 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   const bColor = badgeColors[report.status] || violetLt;
   rect(pw - 48, 8, 34, 10, bColor);
   doc.setTextColor(...white); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
-  doc.text(STATUS_META[report.status].label.toUpperCase(), pw - 31, 14.5, { align: 'center' });
+  doc.text((STATUS_META[report.status]?.label || report.status).toUpperCase(), pw - 31, 14.5, { align: 'center' });
 
   if (report.status === 'approved' && typeof report.adminScore === 'number') {
     rect(pw - 48, 21, 34, 10, [30, 41, 59]);
@@ -203,20 +203,20 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     doc.text(`SCORE: ${report.adminScore}/100`, pw - 31, 27.5, { align: 'center' });
   }
 
-  const tasksDone  = report.tasks.filter(t => taskIsDone(t)).length;
-  const tasksTotal = report.tasks.length;
+  const tasksDone  = (report.tasks || []).filter(t => taskIsDone(t)).length;
+  const tasksTotal = (report.tasks || []).length;
   const taskPct    = tasksTotal ? Math.round(tasksDone / tasksTotal * 100) : 0;
   const acts       = report.activities || [];
   const actDone    = acts.filter(a => a.status === 'Completed').length;
-  const reimbTotal = report.reimbursements.reduce((s, r) => s + r.amount, 0);
+  const reimbTotal = (report.reimbursements || []).reduce((s, r) => s + (r?.amount || 0), 0);
   const nmActs     = report.nextMonthActivities || [];
-  const nmTotal    = report.nextMonthPlan.length + nmActs.length;
+  const nmTotal    = (report.nextMonthPlan || []).length + nmActs.length;
 
   const kpis = [
     { label: 'TASKS DONE',  value: `${tasksDone}/${tasksTotal}`,            sub: `${taskPct}% complete`        },
     { label: 'ACTIVITIES',  value: `${actDone}/${acts.length}`,              sub: 'completed'                   },
     { label: 'NEXT MONTH',  value: `${nmTotal}`,                             sub: 'tasks & activities'          },
-    { label: 'EXPENSES',    value: `₹${reimbTotal.toLocaleString('en-IN')}`, sub: `${report.reimbursements.length} claim(s)` },
+    { label: 'EXPENSES',    value: `₹${reimbTotal.toLocaleString('en-IN')}`, sub: `${(report.reimbursements || []).length} claim(s)` },
   ];
   const kpiW = pw / kpis.length;
   rect(0, 52, pw, 28, slate100);
@@ -249,16 +249,13 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   const bodyStyle = { fontSize: 8, cellPadding: 3, textColor: slate800 as [number,number,number], lineColor: slate200 as [number,number,number], lineWidth: 0.15 };
 
   // ── Section A — Tasks ──────────────────────────────────────────────────────
-  // Fixed column widths ensure consistent date alignment across all rows
-  // Total usable width ≈ 181mm (A4 portrait 210 - 14 margins×2 - borders)
-  // Col widths: # 6 | Task 48 | Project 22 | By 22 | Start 20 | End/Due 20 | TaskStatus 22 | Report 18 | Notes auto
   sectionHeading(`A.  ${monthName} ${report.year} — Task Report (${tasksDone}/${tasksTotal} completed)`, violet);
 
-  const taskRows = report.tasks.map((task, i) => [
+  const taskRows = (report.tasks || []).map((task, i) => [
     String(i + 1),
     task.title || '—',
-    task.project?.name    || '—',
-    task.assignedBy?.name || '—',
+    safeName(task.project),
+    safeName(task.assignedBy),
     task.startDate ? fmt(task.startDate) : '—',
     task.endDate   ? fmt(task.endDate)   : task.dueDate ? fmt(task.dueDate) : '—',
     task.status    || '—',
@@ -276,21 +273,20 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     alternateRowStyles: { fillColor: slate50 },
     tableWidth: 'auto',
     columnStyles: {
-      0: { cellWidth: 6,  halign: 'center'                   },  // #
-      1: { cellWidth: 46, halign: 'left'                     },  // Task
-      2: { cellWidth: 22, halign: 'left'                     },  // Project
-      3: { cellWidth: 22, halign: 'left'                     },  // Assigned By
-      4: { cellWidth: 21, halign: 'center', fontStyle: 'normal' },  // Start  ← fixed width → always visible
-      5: { cellWidth: 21, halign: 'center', fontStyle: 'normal' },  // End/Due← fixed width → always visible
-      6: { cellWidth: 20, halign: 'center'                   },  // Live Status
-      7: { cellWidth: 16, halign: 'center'                   },  // Result badge
-      8: { halign: 'left'                                    },  // Notes (auto)
+      0: { cellWidth: 6,  halign: 'center' },
+      1: { cellWidth: 46, halign: 'left'   },
+      2: { cellWidth: 22, halign: 'left'   },
+      3: { cellWidth: 22, halign: 'left'   },
+      4: { cellWidth: 21, halign: 'center', fontStyle: 'normal' },
+      5: { cellWidth: 21, halign: 'center', fontStyle: 'normal' },
+      6: { cellWidth: 20, halign: 'center' },
+      7: { cellWidth: 16, halign: 'center' },
+      8: { halign: 'left' },
     },
     didParseCell: (data) => {
-      // Force date cells to never be empty-looking
       if (data.section === 'body' && (data.column.index === 4 || data.column.index === 5)) {
         const val = String(data.cell.raw ?? '');
-        if (!val || val === 'undefined' || val === 'null') {
+        if (!val || val === 'undefined' || val === 'null' || val === '—') {
           data.cell.text = ['—'];
         }
       }
@@ -301,8 +297,7 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
         const c: [number,number,number] =
           val === 'Done'        ? emerald :
           val === 'In Progress' ? [96, 165, 250] :
-          val === 'Review'      ? amber :
-                                  slate600;
+          val === 'Review'      ? amber : slate600;
         doc.setTextColor(...c); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
         doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
       }
@@ -319,7 +314,6 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   y = (doc as any).lastAutoTable.finalY + 14;
 
   // ── Section B — Activities ─────────────────────────────────────────────────
-  // # 6 | Activity 52 | Type 28 | Priority 18 | Start 22 | End 22 | Status 22
   sectionHeading(`B.  Activities This Month (${actDone}/${acts.length} completed)`, indigo);
 
   const actRows = acts.map((a, i) => [
@@ -341,13 +335,13 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     headStyles: { ...thStyle, fillColor: indigo, halign: 'center' },
     alternateRowStyles: { fillColor: slate50 },
     columnStyles: {
-      0: { cellWidth: 6,  halign: 'center'  },  // #
-      1: { cellWidth: 56, halign: 'left'    },  // Activity
-      2: { cellWidth: 30, halign: 'left'    },  // Type
-      3: { cellWidth: 18, halign: 'center'  },  // Priority
-      4: { cellWidth: 24, halign: 'center', fontStyle: 'normal' },  // Start
-      5: { cellWidth: 24, halign: 'center', fontStyle: 'normal' },  // End
-      6: { halign: 'center'                 },  // Status (auto)
+      0: { cellWidth: 6,  halign: 'center' },
+      1: { cellWidth: 56, halign: 'left'   },
+      2: { cellWidth: 30, halign: 'left'   },
+      3: { cellWidth: 18, halign: 'center' },
+      4: { cellWidth: 24, halign: 'center', fontStyle: 'normal' },
+      5: { cellWidth: 24, halign: 'center', fontStyle: 'normal' },
+      6: { halign: 'center' },
     },
     didParseCell: (data) => {
       if (data.section === 'body' && (data.column.index === 4 || data.column.index === 5)) {
@@ -374,21 +368,22 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   });
   y = (doc as any).lastAutoTable.finalY + 14;
 
-  // ── Section C — Next Month Plan (Tasks + Activities) ──────────────────────
-  const nmMonth = report.month === 12 ? 1 : report.month + 1;
+  // ── Section C — Next Month Plan ────────────────────────────────────────────
+  const nmMonth = report.month === 12 ? 1  : report.month + 1;
   const nmYear  = report.month === 12 ? report.year + 1 : report.year;
   const nmLabel = `${MONTHS[nmMonth - 1]} ${nmYear}`;
+  const nmPlan  = report.nextMonthPlan || [];
 
-  sectionHeading(`C.  Next Month Plan — ${nmLabel} (${report.nextMonthPlan.length} tasks · ${nmActs.length} activities)`, violetMid);
+  sectionHeading(`C.  Next Month Plan — ${nmLabel} (${nmPlan.length} tasks · ${nmActs.length} activities)`, violetMid);
 
-  if (report.nextMonthPlan.length > 0) {
+  if (nmPlan.length > 0) {
     if (y > ph - 30) { doc.addPage(); y = 20; }
     doc.setTextColor(...violetMid);
     doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
     doc.text('  TASKS', 16, y);
     y += 5;
 
-    const planRows = report.nextMonthPlan.map((item, i) => [
+    const planRows = nmPlan.map((item, i) => [
       String(i + 1),
       item.title        || '—',
       item.projectName  || '—',
@@ -415,7 +410,7 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
         4: { cellWidth: 16, halign: 'center' },
         5: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
         6: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
-        7: { halign: 'left'                  },
+        7: { halign: 'left' },
       },
       didParseCell: (data) => {
         if (data.section === 'body' && (data.column.index === 5 || data.column.index === 6)) {
@@ -469,7 +464,7 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
         4: { cellWidth: 16, halign: 'center' },
         5: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
         6: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
-        7: { halign: 'left'                  },
+        7: { halign: 'left' },
       },
       didParseCell: (data) => {
         if (data.section === 'body' && (data.column.index === 5 || data.column.index === 6)) {
@@ -489,7 +484,7 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     y = (doc as any).lastAutoTable.finalY + 14;
   }
 
-  if (report.nextMonthPlan.length === 0 && nmActs.length === 0) {
+  if (nmPlan.length === 0 && nmActs.length === 0) {
     doc.setTextColor(...slate600); doc.setFontSize(9); doc.setFont('helvetica', 'italic');
     doc.text('No next-month plan submitted.', 16, y);
     y += 10;
@@ -498,14 +493,14 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   }
 
   // ── Section D — Reimbursements ─────────────────────────────────────────────
-  if (report.reimbursements.length > 0) {
+  if ((report.reimbursements || []).length > 0) {
     sectionHeading(`D.  Reimbursements (Total: ₹${reimbTotal.toLocaleString('en-IN')})`, teal);
-    const reimbRows = report.reimbursements.map((r, i) => [
+    const reimbRows = (report.reimbursements || []).map((r, i) => [
       String(i + 1),
-      r.title,
+      r.title || '—',
       r.expenseDate ? fmt(r.expenseDate) : '—',
-      `Rs ${r.amount.toLocaleString('en-IN')}`,
-      r.status,
+      `Rs ${(r.amount || 0).toLocaleString('en-IN')}`,
+      r.status || '—',
     ]);
     autoTable(doc, {
       startY: y,
@@ -516,10 +511,10 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
       headStyles: { ...thStyle, fillColor: teal, halign: 'center' },
       alternateRowStyles: { fillColor: slate50 },
       columnStyles: {
-        0: { cellWidth: 7,  halign: 'center'               },
+        0: { cellWidth: 7,  halign: 'center' },
         2: { cellWidth: 26, halign: 'center', fontStyle: 'normal' },
         3: { cellWidth: 32, halign: 'right',  fontStyle: 'bold'   },
-        4: { cellWidth: 24, halign: 'center'               },
+        4: { cellWidth: 24, halign: 'center' },
       },
       didParseCell: (data) => {
         if (data.section === 'body' && data.column.index === 2) {
@@ -614,13 +609,13 @@ const downloadPDF = async (reports: MonthlyReport[], month: number, year: number
   const rows = reports
     .filter(r => r.employee != null)
     .map(r => {
-      const done    = r.tasks.filter(t => taskIsDone(t)).length;
-      const total   = r.tasks.length;
+      const done    = (r.tasks || []).filter(t => taskIsDone(t)).length;
+      const total   = (r.tasks || []).length;
       const pct     = total ? Math.round(done / total * 100) : 0;
       const aDone   = (r.activities || []).filter(a => a.status === 'Completed').length;
       const aTotal  = (r.activities || []).length;
-      const reimb   = r.reimbursements.reduce((s, rb) => s + rb.amount, 0);
-      const nmTotal = r.nextMonthPlan.length + (r.nextMonthActivities || []).length;
+      const reimb   = (r.reimbursements || []).reduce((s, rb) => s + (rb?.amount || 0), 0);
+      const nmTotal = (r.nextMonthPlan || []).length + (r.nextMonthActivities || []).length;
       return [
         empName(r), empEmail(r),
         `${done}/${total} (${pct}%)`,
@@ -644,7 +639,7 @@ const downloadPDF = async (reports: MonthlyReport[], month: number, year: number
   doc.save(`Team_Reports_${MONTHS[month - 1]}_${year}.pdf`);
 };
 
-// ─── Pill ──────────────────────────────────────────────────────────────────────
+// ─── Pill ─────────────────────────────────────────────────────────────────────
 const Pill: React.FC<{ label: string; val: string | number; color: string }> = ({ label, val, color }) => (
   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 12px', background: color + '0d', border: `1px solid ${color}22`, borderRadius: 10, minWidth: 56 }}>
     <span style={{ fontSize: 16, fontWeight: 700, color, fontFamily: 'Syne,sans-serif', letterSpacing: '-0.03em' }}>{val}</span>
@@ -725,13 +720,15 @@ const ReportDetail: React.FC<{
   const canReject        = (isAdmin || isManager) && ['submitted', 'manager_reviewed'].includes(report.status);
   const canReopen        = (isAdmin || isManager) && report.status === 'rejected';
 
-  const tasksDone  = report.tasks.filter(t => taskIsDone(t)).length;
-  const tasksTotal = report.tasks.length;
+  const tasks      = report.tasks || [];
+  const tasksDone  = tasks.filter(t => taskIsDone(t)).length;
+  const tasksTotal = tasks.length;
   const taskPct    = tasksTotal ? Math.round(tasksDone / tasksTotal * 100) : 0;
   const acts       = report.activities || [];
   const actDone    = acts.filter(a => a.status === 'Completed').length;
   const nmActs     = report.nextMonthActivities || [];
-  const reimbTotal = report.reimbursements.reduce((s, r) => s + r.amount, 0);
+  const reimbs     = report.reimbursements || [];
+  const reimbTotal = reimbs.reduce((s, r) => s + (r?.amount || 0), 0);
   const sm         = STATUS_META[report.status] ?? STATUS_META.draft;
 
   const broadcastAdminUpdate = useCallback(() => {
@@ -759,8 +756,8 @@ const ReportDetail: React.FC<{
     { key: 'overview',   label: 'Overview'                                          },
     { key: 'tasks',      label: `Tasks (${tasksTotal})`                             },
     { key: 'activities', label: `Activities (${acts.length})`                       },
-    { key: 'plan',       label: `Next Month (${report.nextMonthPlan.length + nmActs.length})` },
-    { key: 'reimb',      label: `Expenses (${report.reimbursements.length})`        },
+    { key: 'plan',       label: `Next Month (${(report.nextMonthPlan || []).length + nmActs.length})` },
+    { key: 'reimb',      label: `Expenses (${reimbs.length})`                       },
   ] as const;
 
   return (
@@ -803,7 +800,7 @@ const ReportDetail: React.FC<{
           <Pill label="Tasks"      val={loadingActivities ? '…' : `${tasksDone}/${tasksTotal}`} color={taskPct >= 70 ? '#34d399' : taskPct >= 40 ? '#fbbf24' : '#f87171'} />
           <Pill label="Completion" val={loadingActivities ? '…' : `${taskPct}%`}                color={taskPct >= 70 ? '#34d399' : taskPct >= 40 ? '#fbbf24' : '#f87171'} />
           <Pill label="Activities" val={loadingActivities ? '…' : `${actDone}/${acts.length}`}  color="#60a5fa" />
-          <Pill label="Plans"      val={report.nextMonthPlan.length}                             color="#a78bfa" />
+          <Pill label="Plans"      val={(report.nextMonthPlan || []).length}                     color="#a78bfa" />
           <Pill label="Next Acts"  val={nmActs.length}                                           color="#38bdf8" />
           <Pill label="Expenses"   val={`₹${reimbTotal.toLocaleString('en-IN')}`}               color="#fb923c" />
           {report.status === 'approved' && typeof report.adminScore === 'number' && (
@@ -871,7 +868,7 @@ const ReportDetail: React.FC<{
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', color: 'rgba(255,255,255,0.25)', fontSize: 12 }}>
                       <Loader2 size={14} style={{ animation: 'dp-spin 0.7s linear infinite' }} /> Loading tasks…
                     </div>
-                  ) : report.tasks.slice(0, 6).map(t => {
+                  ) : tasks.slice(0, 6).map(t => {
                     const done = taskIsDone(t);
                     return (
                       <div key={t._id} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
@@ -886,7 +883,7 @@ const ReportDetail: React.FC<{
                       </div>
                     );
                   })}
-                  {report.tasks.length > 6 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginTop: 6, textAlign: 'center' }}>+{report.tasks.length - 6} more in Tasks tab</div>}
+                  {tasks.length > 6 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginTop: 6, textAlign: 'center' }}>+{tasks.length - 6} more in Tasks tab</div>}
                 </PS>
 
                 {(report.managerRemarks || report.adminRemarks) && (
@@ -921,7 +918,7 @@ const ReportDetail: React.FC<{
               <motion.div key="tasks" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                 {loadingActivities ? (
                   <div className="dp-empty"><Loader2 size={28} style={{ opacity: 0.4, animation: 'dp-spin 0.7s linear infinite' }} /><span>Loading tasks…</span></div>
-                ) : report.tasks.length === 0 ? (
+                ) : tasks.length === 0 ? (
                   <div className="dp-empty"><Square size={28} style={{ opacity: 0.1 }} /><span>No tasks in this report</span></div>
                 ) : (
                   <>
@@ -929,8 +926,9 @@ const ReportDetail: React.FC<{
                       <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 100, background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.2)', fontWeight: 500 }}>{tasksDone} Done</span>
                       {tasksTotal - tasksDone > 0 && <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 100, background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)', fontWeight: 500 }}>{tasksTotal - tasksDone} Pending</span>}
                     </div>
-                    {report.tasks.map(task => {
+                    {tasks.map(task => {
                       const done = taskIsDone(task);
+                      const pColor = PRIORITY_COLOR[task.priority || ''] || '#94a3b8';
                       return (
                         <div key={task._id} className="dp-task">
                           <span style={{ color: done ? '#34d399' : 'rgba(255,255,255,0.2)', flexShrink: 0, marginTop: 2 }}>
@@ -941,9 +939,9 @@ const ReportDetail: React.FC<{
                               {task.title}
                             </div>
                             <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.22)', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>
-                              {task.project?.name && `${task.project.name} · `}
+                              {task.project?.name  && `${task.project.name} · `}
                               {task.assignedBy?.name && `By ${task.assignedBy.name} · `}
-                              {task.priority && <span style={{ color: PRIORITY_COLOR[task.priority] || '#94a3b8' }}>{task.priority}</span>}
+                              {task.priority && <span style={{ color: pColor }}>{task.priority}</span>}
                               {task.startDate && ` · ${fmt(task.startDate)}`}
                               {task.endDate   && ` → ${fmt(task.endDate)}`}
                               {task.dueDate   && ` · Due ${fmt(task.dueDate)}`}
@@ -994,9 +992,10 @@ const ReportDetail: React.FC<{
                     {acts.map(a => {
                       const sc = a.status === 'Completed' ? '#34d399' : a.status === 'In Progress' ? '#60a5fa' : '#fbbf24';
                       const sb = a.status === 'Completed' ? 'rgba(52,211,153,0.1)' : a.status === 'In Progress' ? 'rgba(96,165,250,0.1)' : 'rgba(251,191,36,0.1)';
+                      const pColor = PRIORITY_COLOR[a.priority] || '#94a3b8';
                       return (
                         <div key={a._id} className="dp-task">
-                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: PRIORITY_COLOR[a.priority] || '#94a3b8', flexShrink: 0, marginTop: 6 }} />
+                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: pColor, flexShrink: 0, marginTop: 6 }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
                               <span style={{ fontSize: 13.5, fontWeight: 500, color: 'rgba(255,255,255,0.82)', flex: 1 }}>{a.name}</span>
@@ -1022,14 +1021,14 @@ const ReportDetail: React.FC<{
             {/* PLAN */}
             {tab === 'plan' && (
               <motion.div key="plan" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                {report.nextMonthPlan.length > 0 && (
-                  <PS icon={<CheckSquare size={12} />} title="Task Plan" badge={report.nextMonthPlan.length} accent="#a78bfa" defaultOpen>
-                    {report.nextMonthPlan.map((item, i) => (
+                {(report.nextMonthPlan || []).length > 0 && (
+                  <PS icon={<CheckSquare size={12} />} title="Task Plan" badge={(report.nextMonthPlan || []).length} accent="#a78bfa" defaultOpen>
+                    {(report.nextMonthPlan || []).map((item, i) => (
                       <div key={i} style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '10px 12px', marginBottom: 7 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: item.notes ? 5 : 0 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: PRIORITY_COLOR[item.priority], flexShrink: 0, display: 'inline-block' }} />
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: PRIORITY_COLOR[item.priority] || '#94a3b8', flexShrink: 0, display: 'inline-block' }} />
                           <span style={{ fontSize: 13.5, fontWeight: 500, color: 'rgba(255,255,255,0.82)', flex: 1 }}>{item.title}</span>
-                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: PRIORITY_COLOR[item.priority] + '18', color: PRIORITY_COLOR[item.priority], fontWeight: 500 }}>{item.priority}</span>
+                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: (PRIORITY_COLOR[item.priority] || '#94a3b8') + '18', color: PRIORITY_COLOR[item.priority] || '#94a3b8', fontWeight: 500 }}>{item.priority}</span>
                         </div>
                         <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.2)', fontFamily: 'DM Mono,monospace', paddingLeft: 14, marginBottom: item.notes ? 4 : 0 }}>
                           {item.projectName  && `${item.projectName}`}
@@ -1048,9 +1047,9 @@ const ReportDetail: React.FC<{
                     {nmActs.map((a, i) => (
                       <div key={i} style={{ background: 'rgba(56,189,248,0.04)', border: '1px solid rgba(56,189,248,0.1)', borderRadius: 10, padding: '10px 12px', marginBottom: 7 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: PRIORITY_COLOR[a.priority], flexShrink: 0, display: 'inline-block' }} />
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: PRIORITY_COLOR[a.priority] || '#94a3b8', flexShrink: 0, display: 'inline-block' }} />
                           <span style={{ fontSize: 13.5, fontWeight: 500, color: 'rgba(255,255,255,0.82)', flex: 1 }}>{a.name}</span>
-                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: PRIORITY_COLOR[a.priority] + '18', color: PRIORITY_COLOR[a.priority], fontWeight: 500 }}>{a.priority}</span>
+                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: (PRIORITY_COLOR[a.priority] || '#94a3b8') + '18', color: PRIORITY_COLOR[a.priority] || '#94a3b8', fontWeight: 500 }}>{a.priority}</span>
                         </div>
                         <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.2)', fontFamily: 'DM Mono,monospace', paddingLeft: 14, marginBottom: a.notes ? 4 : 0 }}>
                           {a.activityType && `${a.activityType}`}
@@ -1063,7 +1062,7 @@ const ReportDetail: React.FC<{
                     ))}
                   </PS>
                 )}
-                {report.nextMonthPlan.length === 0 && nmActs.length === 0 && !report.nextMonthFreeText && (
+                {(report.nextMonthPlan || []).length === 0 && nmActs.length === 0 && !report.nextMonthFreeText && (
                   <div className="dp-empty"><ArrowRight size={28} style={{ opacity: 0.1 }} /><span>No plan submitted</span></div>
                 )}
                 {report.nextMonthFreeText && (
@@ -1077,17 +1076,17 @@ const ReportDetail: React.FC<{
             {/* REIMB */}
             {tab === 'reimb' && (
               <motion.div key="reimb" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                {report.reimbursements.length === 0 ? (
+                {reimbs.length === 0 ? (
                   <div className="dp-empty"><Receipt size={28} style={{ opacity: 0.1 }} /><span>No expenses linked</span></div>
                 ) : (
                   <>
-                    {report.reimbursements.map(r => (
+                    {reimbs.map(r => (
                       <div key={r._id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.78)', fontWeight: 500 }}>{r.title}</div>
                           {r.expenseDate && <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.22)', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>{fmt(r.expenseDate)}</div>}
                         </div>
-                        <span style={{ fontSize: 13, fontFamily: 'DM Mono,monospace', color: '#fb923c', fontWeight: 600 }}>₹{r.amount.toLocaleString('en-IN')}</span>
+                        <span style={{ fontSize: 13, fontFamily: 'DM Mono,monospace', color: '#fb923c', fontWeight: 600 }}>₹{(r.amount || 0).toLocaleString('en-IN')}</span>
                         <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 100, background: r.status === 'Approved' ? 'rgba(52,211,153,0.12)' : r.status === 'Rejected' ? 'rgba(248,113,113,0.12)' : r.status === 'Paid' ? 'rgba(96,165,250,0.12)' : 'rgba(251,191,36,0.12)', color: r.status === 'Approved' ? '#34d399' : r.status === 'Rejected' ? '#f87171' : r.status === 'Paid' ? '#60a5fa' : '#fbbf24' }}>{r.status}</span>
                       </div>
                     ))}
@@ -1168,12 +1167,34 @@ export const AdminReportReview: React.FC = () => {
   const isManager = ['manager', 'project-manager'].includes(user?.accessLevel || '');
   const YEARS     = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
+  /** Normalise a report so no downstream code ever sees null nested objects */
+  const normalise = (r: MonthlyReport): MonthlyReport => ({
+    ...r,
+    tasks:               (r.tasks || []).map(t => ({
+      ...t,
+      project:    t.project    ?? null,
+      assignedBy: t.assignedBy ?? null,
+      status:     t.status     ?? null,
+      priority:   t.priority   ?? null,
+    })),
+    activities:          (r.activities || []).map(a => ({
+      ...a,
+      project: a.project ?? null,
+      task:    a.task    ?? null,
+    })),
+    reimbursements:      r.reimbursements      || [],
+    nextMonthPlan:       r.nextMonthPlan       || [],
+    nextMonthActivities: r.nextMonthActivities || [],
+    nextMonthFreeText:   r.nextMonthFreeText   || '',
+  });
+
   const fetchReports = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get(`/monthly-reports/team?month=${month}&year=${year}`);
-      // Filter out any reports where employee is null (orphaned records)
-      const data = Array.isArray(res.data) ? res.data.filter((r: MonthlyReport) => r.employee != null) : [];
+      const data: MonthlyReport[] = Array.isArray(res.data)
+        ? res.data.filter((r: MonthlyReport) => r.employee != null).map(normalise)
+        : [];
       setReports(data);
     } catch (err) {
       console.error(err);
@@ -1181,6 +1202,7 @@ export const AdminReportReview: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, year]);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
@@ -1221,18 +1243,22 @@ export const AdminReportReview: React.FC = () => {
   }, [fetchReports, month, year]);
 
   const onUpdated = useCallback((updated: MonthlyReport) => {
-    setReports(prev => prev.map(r => r._id === updated._id ? updated : r));
-    setSelected(updated);
+    // Guard: never put a null-employee report into state
+    if (!updated?.employee) return;
+    const safe = normalise(updated);
+    setReports(prev => prev.map(r => r._id === safe._id ? safe : r));
+    setSelected(safe);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = reports.filter(r => {
-    if (!r.employee) return false; // safety guard
+    if (!r.employee) return false;
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       return (
-        r.employee.name.toLowerCase().includes(q) ||
-        r.employee.email.toLowerCase().includes(q)
+        (r.employee.name  || '').toLowerCase().includes(q) ||
+        (r.employee.email || '').toLowerCase().includes(q)
       );
     }
     return true;
@@ -1445,16 +1471,16 @@ export const AdminReportReview: React.FC = () => {
                       </td>
                     </tr>
                   ) : filtered.map((r, i) => {
-                    // r.employee is guaranteed non-null here (filtered above)
-                    const done     = r.tasks.filter(t => taskIsDone(t)).length;
-                    const total    = r.tasks.length;
+                    const tasks    = r.tasks || [];
+                    const done     = tasks.filter(t => taskIsDone(t)).length;
+                    const total    = tasks.length;
                     const pct      = total ? Math.round(done / total * 100) : 0;
                     const sm       = STATUS_META[r.status] ?? STATUS_META.draft;
                     const pColor   = pct >= 70 ? '#34d399' : pct >= 40 ? '#fbbf24' : '#f87171';
                     const rActs    = r.activities || [];
                     const rActDone = rActs.filter(a => a.status === 'Completed').length;
-                    const reimbAmt = r.reimbursements.reduce((s, rb) => s + rb.amount, 0);
-                    const nmPlans  = r.nextMonthPlan.length + (r.nextMonthActivities || []).length;
+                    const reimbAmt = (r.reimbursements || []).reduce((s, rb) => s + (rb?.amount || 0), 0);
+                    const nmPlans  = (r.nextMonthPlan || []).length + (r.nextMonthActivities || []).length;
 
                     return (
                       <motion.tr
@@ -1485,10 +1511,10 @@ export const AdminReportReview: React.FC = () => {
                           }
                         </td>
                         <td className="arr-td hide-sm">
-                          {r.reimbursements.length > 0 ? (
+                          {(r.reimbursements || []).length > 0 ? (
                             <div style={{ fontSize: 12, color: '#fb923c', fontFamily: 'DM Mono,monospace', fontWeight: 600 }}>
                               ₹{reimbAmt.toLocaleString('en-IN')}
-                              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)', fontWeight: 400, fontFamily: 'DM Sans,sans-serif' }}>{r.reimbursements.length} claim{r.reimbursements.length !== 1 ? 's' : ''}</div>
+                              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)', fontWeight: 400, fontFamily: 'DM Sans,sans-serif' }}>{(r.reimbursements || []).length} claim{(r.reimbursements || []).length !== 1 ? 's' : ''}</div>
                             </div>
                           ) : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontStyle: 'italic' }}>—</span>}
                         </td>
