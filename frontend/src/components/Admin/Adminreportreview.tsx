@@ -23,8 +23,8 @@ interface TaskEntry {
   isDone: boolean;
   doneNote: string;
   undoneNote: string;
-  assignedBy?: { name: string };
-  project?: { name: string };
+  assignedBy?: { name: string } | null;
+  project?: { name: string } | null;
   dueDate?: string;
   startDate?: string;
   endDate?: string;
@@ -65,16 +65,16 @@ interface ActivityItem {
   priority: string;
   startDate?: string;
   endDate?: string;
-  task?: { title: string };
-  project?: { name: string };
+  task?: { title: string } | null;
+  project?: { name: string } | null;
 }
 interface MonthlyReport {
   _id: string;
   month: number;
   year: number;
   status: 'draft' | 'submitted' | 'manager_reviewed' | 'approved' | 'rejected';
-  employee: { _id: string; name: string; email: string; accessLevel: string };
-  reportingManager?: { _id: string; name: string };
+  employee: { _id: string; name: string; email: string; accessLevel: string } | null;
+  reportingManager?: { _id: string; name: string } | null;
   tasks: TaskEntry[];
   nextMonthPlan: NextMonthTask[];
   nextMonthActivities?: NextMonthActivity[];
@@ -112,25 +112,40 @@ const AVATAR_GRADS = [
   'linear-gradient(135deg,#dc2626,#f87171)',
   'linear-gradient(135deg,#7c3aed,#ec4899)',
 ];
-const initials = (n: string) =>
-  n.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
-const fmt = (d?: string) =>
+
+const initials = (n?: string | null): string => {
+  if (!n || typeof n !== 'string') return 'NA';
+  return n
+    .split(' ')
+    .filter(Boolean)
+    .map(w => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || 'NA';
+};
+
+const fmt = (d?: string | null): string =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
 // Derive done state from either the boolean field or the live status string
 const taskIsDone = (t: TaskEntry): boolean =>
   t.isDone || t.status === 'Done' || t.status === 'done' || t.status === 'Completed' || t.status === 'completed';
 
+// Safe employee name helper
+const empName  = (r: MonthlyReport): string => r.employee?.name  || 'Unknown Employee';
+const empEmail = (r: MonthlyReport): string => r.employee?.email || '—';
+
 // ─── PDF: Individual Employee ─────────────────────────────────────────────────
 const downloadEmployeePDF = async (report: MonthlyReport) => {
   const { default: jsPDF }     = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
 
-  const doc      = new jsPDF('portrait', 'mm', 'a4');
-  const pw       = doc.internal.pageSize.getWidth();
-  const ph       = doc.internal.pageSize.getHeight();
+  const doc       = new jsPDF('portrait', 'mm', 'a4');
+  const pw        = doc.internal.pageSize.getWidth();
+  const ph        = doc.internal.pageSize.getHeight();
   const monthName = MONTHS[report.month - 1];
 
+  // ── Palette ────────────────────────────────────────────────────────────────
   const violet   : [number,number,number] = [109,  40, 217];
   const violetMid: [number,number,number] = [139,  92, 246];
   const violetLt : [number,number,number] = [167, 139, 250];
@@ -154,7 +169,9 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     doc.setDrawColor(...c); doc.setLineWidth(0.2); doc.line(x1, y, x2, y);
   };
 
-  // Cover header
+  const employeeName = empName(report);
+
+  // ── Cover header ───────────────────────────────────────────────────────────
   rect(0, 0, pw, 52, violet);
   rect(0, 46, pw, 6, violetMid);
   doc.setTextColor(...white);
@@ -164,10 +181,10 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.15);
   doc.line(14, 14.5, pw - 14, 14.5);
   doc.setFontSize(22);
-  doc.text(report.employee.name.toUpperCase(), 14, 30);
+  doc.text(employeeName.toUpperCase(), 14, 30);
   doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
   doc.setTextColor(200, 180, 255);
-  doc.text(report.employee.email, 14, 38);
+  doc.text(empEmail(report), 14, 38);
   doc.text(`${monthName.toUpperCase()} ${report.year}`, 14, 44);
 
   const badgeColors: Record<string, [number,number,number]> = {
@@ -193,13 +210,12 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   const actDone    = acts.filter(a => a.status === 'Completed').length;
   const reimbTotal = report.reimbursements.reduce((s, r) => s + r.amount, 0);
   const nmActs     = report.nextMonthActivities || [];
-  // Combined next month count: tasks + activities
   const nmTotal    = report.nextMonthPlan.length + nmActs.length;
 
   const kpis = [
-    { label: 'TASKS DONE',  value: `${tasksDone}/${tasksTotal}`,            sub: `${taskPct}% complete`       },
-    { label: 'ACTIVITIES',  value: `${actDone}/${acts.length}`,              sub: 'completed'                  },
-    { label: 'NEXT MONTH',  value: `${nmTotal}`,                             sub: 'tasks & activities'         },
+    { label: 'TASKS DONE',  value: `${tasksDone}/${tasksTotal}`,            sub: `${taskPct}% complete`        },
+    { label: 'ACTIVITIES',  value: `${actDone}/${acts.length}`,              sub: 'completed'                   },
+    { label: 'NEXT MONTH',  value: `${nmTotal}`,                             sub: 'tasks & activities'          },
     { label: 'EXPENSES',    value: `₹${reimbTotal.toLocaleString('en-IN')}`, sub: `${report.reimbursements.length} claim(s)` },
   ];
   const kpiW = pw / kpis.length;
@@ -229,50 +245,69 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     y += 12;
   };
 
-  const thStyle   = { fillColor: violet as [number,number,number], textColor: white as [number,number,number], fontStyle: 'bold' as const, fontSize: 8,   cellPadding: 3.5 };
-  const bodyStyle = { fontSize: 8.5, cellPadding: 3.5, textColor: slate800 as [number,number,number], lineColor: slate200 as [number,number,number], lineWidth: 0.15 };
+  const thStyle   = { fillColor: violet as [number,number,number], textColor: white as [number,number,number], fontStyle: 'bold' as const, fontSize: 8, cellPadding: 3 };
+  const bodyStyle = { fontSize: 8, cellPadding: 3, textColor: slate800 as [number,number,number], lineColor: slate200 as [number,number,number], lineWidth: 0.15 };
 
   // ── Section A — Tasks ──────────────────────────────────────────────────────
-  // Columns: #, Task, Project, By, Start, End/Due, Task Status, Report, Notes
-  // (Pri column removed)
+  // Fixed column widths ensure consistent date alignment across all rows
+  // Total usable width ≈ 181mm (A4 portrait 210 - 14 margins×2 - borders)
+  // Col widths: # 6 | Task 48 | Project 22 | By 22 | Start 20 | End/Due 20 | TaskStatus 22 | Report 18 | Notes auto
   sectionHeading(`A.  ${monthName} ${report.year} — Task Report (${tasksDone}/${tasksTotal} completed)`, violet);
+
   const taskRows = report.tasks.map((task, i) => [
-    (i + 1).toString(),
-    task.title,
+    String(i + 1),
+    task.title || '—',
     task.project?.name    || '—',
     task.assignedBy?.name || '—',
-    fmt(task.startDate),                                                           // always show (fmt returns '—' if missing)
-    task.endDate ? fmt(task.endDate) : fmt(task.dueDate),                          // prefer endDate, fall back to dueDate
-    task.status           || '—',
+    task.startDate ? fmt(task.startDate) : '—',
+    task.endDate   ? fmt(task.endDate)   : task.dueDate ? fmt(task.dueDate) : '—',
+    task.status    || '—',
     taskIsDone(task) ? 'Done' : 'Pending',
     taskIsDone(task) ? (task.doneNote || '—') : (task.undoneNote || '—'),
   ]);
+
   autoTable(doc, {
     startY: y,
-    head: [['#', 'Task', 'Project', 'By', 'Start', 'End/Due', 'Task Status', 'Report', 'Notes']],
+    head: [['#', 'Task', 'Project', 'Assigned By', 'Start', 'End / Due', 'Live Status', 'Result', 'Notes']],
     body: taskRows.length ? taskRows : [['—', 'No tasks recorded', '—', '—', '—', '—', '—', '—', '—']],
-    theme: 'grid', styles: bodyStyle, headStyles: thStyle,
+    theme: 'grid',
+    styles: { ...bodyStyle, overflow: 'linebreak', cellPadding: { top: 3, right: 3, bottom: 3, left: 3 } },
+    headStyles: { ...thStyle, halign: 'center' },
     alternateRowStyles: { fillColor: slate50 },
+    tableWidth: 'auto',
     columnStyles: {
-      0: { cellWidth: 7,  halign: 'center' },
-      6: { cellWidth: 22, halign: 'center' },   // Task Status (live)
-      7: { cellWidth: 18, halign: 'center' },   // Report Done/Pending
+      0: { cellWidth: 6,  halign: 'center'                   },  // #
+      1: { cellWidth: 46, halign: 'left'                     },  // Task
+      2: { cellWidth: 22, halign: 'left'                     },  // Project
+      3: { cellWidth: 22, halign: 'left'                     },  // Assigned By
+      4: { cellWidth: 21, halign: 'center', fontStyle: 'normal' },  // Start  ← fixed width → always visible
+      5: { cellWidth: 21, halign: 'center', fontStyle: 'normal' },  // End/Due← fixed width → always visible
+      6: { cellWidth: 20, halign: 'center'                   },  // Live Status
+      7: { cellWidth: 16, halign: 'center'                   },  // Result badge
+      8: { halign: 'left'                                    },  // Notes (auto)
+    },
+    didParseCell: (data) => {
+      // Force date cells to never be empty-looking
+      if (data.section === 'body' && (data.column.index === 4 || data.column.index === 5)) {
+        const val = String(data.cell.raw ?? '');
+        if (!val || val === 'undefined' || val === 'null') {
+          data.cell.text = ['—'];
+        }
+      }
     },
     didDrawCell: (data) => {
-      // Live task status (col 6) — color-coded text
       if (data.section === 'body' && data.column.index === 6) {
-        const val = data.cell.raw as string;
+        const val = String(data.cell.raw ?? '');
         const c: [number,number,number] =
           val === 'Done'        ? emerald :
           val === 'In Progress' ? [96, 165, 250] :
           val === 'Review'      ? amber :
                                   slate600;
-        doc.setTextColor(...c); doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...c); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
         doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
       }
-      // Report snapshot Done/Pending badge (col 7)
       if (data.section === 'body' && data.column.index === 7) {
-        const val = data.cell.raw as string;
+        const val = String(data.cell.raw ?? '');
         const c   = val === 'Done' ? emerald : amber;
         doc.setFillColor(...c);
         doc.roundedRect(data.cell.x + 2, data.cell.y + 1.5, data.cell.width - 4, data.cell.height - 3, 1.5, 1.5, 'F');
@@ -284,40 +319,53 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   y = (doc as any).lastAutoTable.finalY + 14;
 
   // ── Section B — Activities ─────────────────────────────────────────────────
-  // Columns: #, Activity, Type, Priority, Start, End, Status
-  // (Project/Task column removed)
+  // # 6 | Activity 52 | Type 28 | Priority 18 | Start 22 | End 22 | Status 22
   sectionHeading(`B.  Activities This Month (${actDone}/${acts.length} completed)`, indigo);
+
   const actRows = acts.map((a, i) => [
-    (i + 1).toString(),
-    a.name,
+    String(i + 1),
+    a.name         || '—',
     a.activityType || '—',
     a.priority     || '—',
-    fmt(a.startDate),
-    fmt(a.endDate),
-    a.status,
+    a.startDate    ? fmt(a.startDate) : '—',
+    a.endDate      ? fmt(a.endDate)   : '—',
+    a.status       || '—',
   ]);
+
   autoTable(doc, {
     startY: y,
     head: [['#', 'Activity', 'Type', 'Priority', 'Start', 'End', 'Status']],
     body: actRows.length ? actRows : [['—', 'No activities recorded', '—', '—', '—', '—', '—']],
-    theme: 'grid', styles: bodyStyle, headStyles: { ...thStyle, fillColor: indigo },
+    theme: 'grid',
+    styles: { ...bodyStyle, overflow: 'linebreak' },
+    headStyles: { ...thStyle, fillColor: indigo, halign: 'center' },
     alternateRowStyles: { fillColor: slate50 },
     columnStyles: {
-      0: { cellWidth: 7,  halign: 'center' },
-      3: { cellWidth: 16, halign: 'center' },   // Priority
-      6: { cellWidth: 22, halign: 'center' },   // Status
+      0: { cellWidth: 6,  halign: 'center'  },  // #
+      1: { cellWidth: 56, halign: 'left'    },  // Activity
+      2: { cellWidth: 30, halign: 'left'    },  // Type
+      3: { cellWidth: 18, halign: 'center'  },  // Priority
+      4: { cellWidth: 24, halign: 'center', fontStyle: 'normal' },  // Start
+      5: { cellWidth: 24, halign: 'center', fontStyle: 'normal' },  // End
+      6: { halign: 'center'                 },  // Status (auto)
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && (data.column.index === 4 || data.column.index === 5)) {
+        const val = String(data.cell.raw ?? '');
+        if (!val || val === 'undefined' || val === 'null') data.cell.text = ['—'];
+      }
     },
     didDrawCell: (data) => {
       if (data.section === 'body' && data.column.index === 6) {
-        const val = data.cell.raw as string;
-        const c   = val === 'Completed' ? emerald : val === 'In Progress' ? [96,165,250] as [number,number,number] : amber;
+        const val = String(data.cell.raw ?? '');
+        const c: [number,number,number] = val === 'Completed' ? emerald : val === 'In Progress' ? [96,165,250] : amber;
         doc.setFillColor(...c);
         doc.roundedRect(data.cell.x + 2, data.cell.y + 1.5, data.cell.width - 4, data.cell.height - 3, 1.5, 1.5, 'F');
         doc.setTextColor(...white); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
         doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
       }
       if (data.section === 'body' && data.column.index === 3) {
-        const val = data.cell.raw as string;
+        const val = String(data.cell.raw ?? '');
         const c: [number,number,number] = val === 'High' ? [248,113,113] : val === 'Medium' ? amber : [96,165,250];
         doc.setTextColor(...c); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
         doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
@@ -326,45 +374,58 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   });
   y = (doc as any).lastAutoTable.finalY + 14;
 
-  // ── Section C — Next Month Plan (Tasks + Activities combined) ─────────────
+  // ── Section C — Next Month Plan (Tasks + Activities) ──────────────────────
   const nmMonth = report.month === 12 ? 1 : report.month + 1;
   const nmYear  = report.month === 12 ? report.year + 1 : report.year;
   const nmLabel = `${MONTHS[nmMonth - 1]} ${nmYear}`;
 
   sectionHeading(`C.  Next Month Plan — ${nmLabel} (${report.nextMonthPlan.length} tasks · ${nmActs.length} activities)`, violetMid);
 
-  // Tasks sub-section header (only if there are tasks)
   if (report.nextMonthPlan.length > 0) {
     if (y > ph - 30) { doc.addPage(); y = 20; }
-    doc.setFillColor(...[230, 220, 255] as [number,number,number]);
     doc.setTextColor(...violetMid);
     doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
     doc.text('  TASKS', 16, y);
     y += 5;
 
     const planRows = report.nextMonthPlan.map((item, i) => [
-      (i + 1).toString(),
+      String(i + 1),
       item.title        || '—',
       item.projectName  || '—',
       item.assigneeName || '—',
       item.priority     || '—',
-      fmt(item.startDate),
-      fmt(item.endDate),
+      item.startDate    ? fmt(item.startDate) : '—',
+      item.endDate      ? fmt(item.endDate)   : '—',
       item.notes        || '—',
     ]);
+
     autoTable(doc, {
       startY: y,
       head: [['#', 'Task / Goal', 'Project', 'Assignee', 'Priority', 'Start', 'End', 'Notes']],
       body: planRows,
-      theme: 'grid', styles: bodyStyle, headStyles: { ...thStyle, fillColor: violetMid },
+      theme: 'grid',
+      styles: { ...bodyStyle, overflow: 'linebreak' },
+      headStyles: { ...thStyle, fillColor: violetMid, halign: 'center' },
       alternateRowStyles: { fillColor: slate50 },
       columnStyles: {
-        0: { cellWidth: 7,  halign: 'center' },
+        0: { cellWidth: 6,  halign: 'center' },
+        1: { cellWidth: 46, halign: 'left'   },
+        2: { cellWidth: 24, halign: 'left'   },
+        3: { cellWidth: 24, halign: 'left'   },
         4: { cellWidth: 16, halign: 'center' },
+        5: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
+        6: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
+        7: { halign: 'left'                  },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && (data.column.index === 5 || data.column.index === 6)) {
+          const val = String(data.cell.raw ?? '');
+          if (!val || val === 'undefined' || val === 'null') data.cell.text = ['—'];
+        }
       },
       didDrawCell: (data) => {
         if (data.section === 'body' && data.column.index === 4) {
-          const val = data.cell.raw as string;
+          const val = String(data.cell.raw ?? '');
           const c: [number,number,number] = val === 'High' ? [248,113,113] : val === 'Medium' ? amber : [96,165,250];
           doc.setTextColor(...c); doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
           doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
@@ -374,7 +435,6 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     y = (doc as any).lastAutoTable.finalY + 10;
   }
 
-  // Activities sub-section (only if there are next-month activities)
   if (nmActs.length > 0) {
     if (y > ph - 30) { doc.addPage(); y = 20; }
     doc.setTextColor(...sky);
@@ -383,28 +443,43 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     y += 5;
 
     const nmActRows = nmActs.map((a, i) => [
-      (i + 1).toString(),
+      String(i + 1),
       a.name         || '—',
       a.projectName  || '—',
       a.activityType || '—',
       a.priority     || '—',
-      fmt(a.startDate),
-      fmt(a.endDate),
+      a.startDate    ? fmt(a.startDate) : '—',
+      a.endDate      ? fmt(a.endDate)   : '—',
       a.notes        || '—',
     ]);
+
     autoTable(doc, {
       startY: y,
       head: [['#', 'Activity', 'Project', 'Type', 'Priority', 'Start', 'End', 'Notes']],
       body: nmActRows,
-      theme: 'grid', styles: bodyStyle, headStyles: { ...thStyle, fillColor: sky },
+      theme: 'grid',
+      styles: { ...bodyStyle, overflow: 'linebreak' },
+      headStyles: { ...thStyle, fillColor: sky, halign: 'center' },
       alternateRowStyles: { fillColor: slate50 },
       columnStyles: {
-        0: { cellWidth: 7,  halign: 'center' },
+        0: { cellWidth: 6,  halign: 'center' },
+        1: { cellWidth: 46, halign: 'left'   },
+        2: { cellWidth: 24, halign: 'left'   },
+        3: { cellWidth: 24, halign: 'left'   },
         4: { cellWidth: 16, halign: 'center' },
+        5: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
+        6: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
+        7: { halign: 'left'                  },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && (data.column.index === 5 || data.column.index === 6)) {
+          const val = String(data.cell.raw ?? '');
+          if (!val || val === 'undefined' || val === 'null') data.cell.text = ['—'];
+        }
       },
       didDrawCell: (data) => {
         if (data.section === 'body' && data.column.index === 4) {
-          const val = data.cell.raw as string;
+          const val = String(data.cell.raw ?? '');
           const c: [number,number,number] = val === 'High' ? [248,113,113] : val === 'Medium' ? amber : [96,165,250];
           doc.setTextColor(...c); doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
           doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
@@ -414,7 +489,6 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     y = (doc as any).lastAutoTable.finalY + 14;
   }
 
-  // If neither tasks nor activities exist
   if (report.nextMonthPlan.length === 0 && nmActs.length === 0) {
     doc.setTextColor(...slate600); doc.setFontSize(9); doc.setFont('helvetica', 'italic');
     doc.text('No next-month plan submitted.', 16, y);
@@ -423,12 +497,13 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     y += 4;
   }
 
-  // ── Section D — Reimbursements (was E) ────────────────────────────────────
+  // ── Section D — Reimbursements ─────────────────────────────────────────────
   if (report.reimbursements.length > 0) {
     sectionHeading(`D.  Reimbursements (Total: ₹${reimbTotal.toLocaleString('en-IN')})`, teal);
     const reimbRows = report.reimbursements.map((r, i) => [
-      (i + 1).toString(), r.title,
-      fmt(r.expenseDate),
+      String(i + 1),
+      r.title,
+      r.expenseDate ? fmt(r.expenseDate) : '—',
       `Rs ${r.amount.toLocaleString('en-IN')}`,
       r.status,
     ]);
@@ -436,16 +511,25 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
       startY: y,
       head: [['#', 'Title', 'Date', 'Amount', 'Status']],
       body: reimbRows,
-      theme: 'grid', styles: bodyStyle, headStyles: { ...thStyle, fillColor: teal },
+      theme: 'grid',
+      styles: bodyStyle,
+      headStyles: { ...thStyle, fillColor: teal, halign: 'center' },
       alternateRowStyles: { fillColor: slate50 },
       columnStyles: {
-        0: { cellWidth: 7,  halign: 'center'                                },
-        3: { cellWidth: 32, halign: 'right', fontStyle: 'bold'              },
-        4: { cellWidth: 24, halign: 'center'                                },
+        0: { cellWidth: 7,  halign: 'center'               },
+        2: { cellWidth: 26, halign: 'center', fontStyle: 'normal' },
+        3: { cellWidth: 32, halign: 'right',  fontStyle: 'bold'   },
+        4: { cellWidth: 24, halign: 'center'               },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 2) {
+          const val = String(data.cell.raw ?? '');
+          if (!val || val === 'undefined' || val === 'null') data.cell.text = ['—'];
+        }
       },
       didDrawCell: (data) => {
         if (data.section === 'body' && data.column.index === 4) {
-          const val = data.cell.raw as string;
+          const val = String(data.cell.raw ?? '');
           const c   = val === 'Approved' ? emerald : val === 'Rejected' ? rose : val === 'Paid' ? [96,165,250] as [number,number,number] : amber;
           doc.setFillColor(...c);
           doc.roundedRect(data.cell.x + 2, data.cell.y + 1.5, data.cell.width - 4, data.cell.height - 3, 1.5, 1.5, 'F');
@@ -457,14 +541,14 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     y = (doc as any).lastAutoTable.finalY + 14;
   }
 
-  // ── Overall Summary ───────────────────────────────────────────────────────
+  // ── Overall Summary ────────────────────────────────────────────────────────
   if (y > ph - 55) { doc.addPage(); y = 20; }
   rect(14, y, pw - 28, 7, teal);
   doc.setTextColor(...white); doc.setFontSize(8); doc.setFont('helvetica', 'bold');
   doc.text('  OVERALL SUMMARY', 16, y + 5);
   y += 11;
 
-  const summaryParts = [];
+  const summaryParts: string[] = [];
   if (report.managerRemarks)    summaryParts.push(`Manager Remarks: ${report.managerRemarks}`);
   if (report.adminRemarks)      summaryParts.push(`Admin Remarks: ${report.adminRemarks}`);
   if (report.nextMonthFreeText) summaryParts.push(`Next Month Notes: ${report.nextMonthFreeText}`);
@@ -494,13 +578,13 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     y = (doc as any).lastAutoTable.finalY + 14;
   }
 
-  // ── Footer on every page ──────────────────────────────────────────────────
+  // ── Footer on every page ───────────────────────────────────────────────────
   const totalPages = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
     rect(0, ph - 14, pw, 14, slate800);
     doc.setTextColor(...white); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-    doc.text(`${report.employee.name}  ·  ${monthName} ${report.year}  ·  CONFIDENTIAL`, 14, ph - 6);
+    doc.text(`${employeeName}  ·  ${monthName} ${report.year}  ·  CONFIDENTIAL`, 14, ph - 6);
     doc.text(`Page ${p} of ${totalPages}`, pw - 14, ph - 6, { align: 'right' });
     doc.text(`Generated ${new Date().toLocaleDateString('en-IN')}`, pw / 2, ph - 6, { align: 'center' });
   }
@@ -514,7 +598,7 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     doc.text('Reporting Manager Signature', pw / 2 + 10, y + 8);
   }
 
-  doc.save(`${report.employee.name.replace(/\s+/g, '_')}_${monthName}_${report.year}_Report.pdf`);
+  doc.save(`${employeeName.replace(/\s+/g, '_')}_${monthName}_${report.year}_Report.pdf`);
 };
 
 // ─── PDF: Team Summary ────────────────────────────────────────────────────────
@@ -527,24 +611,26 @@ const downloadPDF = async (reports: MonthlyReport[], month: number, year: number
   doc.setFontSize(10);
   doc.text(`Generated ${new Date().toLocaleDateString('en-IN')}`, 15, 28);
 
-  const rows = reports.map(r => {
-    const done   = r.tasks.filter(t => taskIsDone(t)).length;
-    const total  = r.tasks.length;
-    const pct    = total ? Math.round(done / total * 100) : 0;
-    const aDone  = (r.activities || []).filter(a => a.status === 'Completed').length;
-    const aTotal = (r.activities || []).length;
-    const reimb  = r.reimbursements.reduce((s, rb) => s + rb.amount, 0);
-    const nmTotal = r.nextMonthPlan.length + (r.nextMonthActivities || []).length;
-    return [
-      r.employee.name, r.employee.email,
-      `${done}/${total} (${pct}%)`,
-      `${aDone}/${aTotal}`,
-      `Rs ${reimb.toLocaleString('en-IN')}`,
-      nmTotal,
-      STATUS_META[r.status].label,
-      r.status === 'approved' && typeof r.adminScore === 'number' ? `${r.adminScore}/100` : '—',
-    ];
-  });
+  const rows = reports
+    .filter(r => r.employee != null)
+    .map(r => {
+      const done    = r.tasks.filter(t => taskIsDone(t)).length;
+      const total   = r.tasks.length;
+      const pct     = total ? Math.round(done / total * 100) : 0;
+      const aDone   = (r.activities || []).filter(a => a.status === 'Completed').length;
+      const aTotal  = (r.activities || []).length;
+      const reimb   = r.reimbursements.reduce((s, rb) => s + rb.amount, 0);
+      const nmTotal = r.nextMonthPlan.length + (r.nextMonthActivities || []).length;
+      return [
+        empName(r), empEmail(r),
+        `${done}/${total} (${pct}%)`,
+        `${aDone}/${aTotal}`,
+        `Rs ${reimb.toLocaleString('en-IN')}`,
+        String(nmTotal),
+        STATUS_META[r.status]?.label ?? r.status,
+        r.status === 'approved' && typeof r.adminScore === 'number' ? `${r.adminScore}/100` : '—',
+      ];
+    });
 
   autoTable(doc, {
     startY: 36,
@@ -558,7 +644,7 @@ const downloadPDF = async (reports: MonthlyReport[], month: number, year: number
   doc.save(`Team_Reports_${MONTHS[month - 1]}_${year}.pdf`);
 };
 
-// ─── Pill ─────────────────────────────────────────────────────────────────────
+// ─── Pill ──────────────────────────────────────────────────────────────────────
 const Pill: React.FC<{ label: string; val: string | number; color: string }> = ({ label, val, color }) => (
   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 12px', background: color + '0d', border: `1px solid ${color}22`, borderRadius: 10, minWidth: 56 }}>
     <span style={{ fontSize: 16, fontWeight: 700, color, fontFamily: 'Syne,sans-serif', letterSpacing: '-0.03em' }}>{val}</span>
@@ -609,17 +695,15 @@ const ReportDetail: React.FC<{
   const [report,            setReport]            = useState<MonthlyReport>(initialReport);
   const [loadingActivities, setLoadingActivities] = useState(false);
 
-  // Fetch the full report (tasks with correct isDone/status from subdocuments)
   useEffect(() => {
     setLoadingActivities(true);
     api.get(`/monthly-reports/${initialReport._id}`)
       .then(res => { if (res.data?._id) setReport(res.data); })
       .catch(err => console.error('Failed to load full report:', err))
       .finally(() => setLoadingActivities(false));
-  
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialReport._id]);
 
-  // Keep in sync when parent pushes updates
   useEffect(() => {
     setReport(prev => ({
       ...initialReport,
@@ -630,14 +714,14 @@ const ReportDetail: React.FC<{
 
   const [tab,            setTab]            = useState<'overview' | 'tasks' | 'activities' | 'plan' | 'reimb'>('overview');
   const [managerRemarks, setManagerRemarks] = useState(initialReport.managerRemarks || '');
-  const [adminRemarks,   setAdminRemarks]   = useState(initialReport.adminRemarks || '');
+  const [adminRemarks,   setAdminRemarks]   = useState(initialReport.adminRemarks   || '');
   const [adminScore,     setAdminScore]     = useState<number>(initialReport.adminScore ?? 0);
   const [rejectionNote,  setRejectionNote]  = useState('');
   const [saving,         setSaving]         = useState<string | null>(null);
   const [error,          setError]          = useState('');
 
   const canManagerReview = isManager && report.status === 'submitted';
-  const canAdminApprove  = isAdmin && ['submitted', 'manager_reviewed'].includes(report.status);
+  const canAdminApprove  = isAdmin   && ['submitted', 'manager_reviewed'].includes(report.status);
   const canReject        = (isAdmin || isManager) && ['submitted', 'manager_reviewed'].includes(report.status);
   const canReopen        = (isAdmin || isManager) && report.status === 'rejected';
 
@@ -648,9 +732,8 @@ const ReportDetail: React.FC<{
   const actDone    = acts.filter(a => a.status === 'Completed').length;
   const nmActs     = report.nextMonthActivities || [];
   const reimbTotal = report.reimbursements.reduce((s, r) => s + r.amount, 0);
-  const sm         = STATUS_META[report.status];
+  const sm         = STATUS_META[report.status] ?? STATUS_META.draft;
 
-  // Broadcast to employee panel after every admin action
   const broadcastAdminUpdate = useCallback(() => {
     try {
       const ch = new BroadcastChannel(SYNC_CHANNEL);
@@ -664,7 +747,7 @@ const ReportDetail: React.FC<{
     try {
       const res = await api.post(`/monthly-reports/${report._id}/${endpoint}`, body);
       onUpdated(res.data);
-      broadcastAdminUpdate();           // ← notify employee panel immediately
+      broadcastAdminUpdate();
     } catch (err: any) {
       setError(err?.response?.data?.msg || `Failed to ${label}`);
     } finally {
@@ -673,11 +756,11 @@ const ReportDetail: React.FC<{
   };
 
   const TABS = [
-    { key: 'overview',   label: 'Overview'                                       },
-    { key: 'tasks',      label: `Tasks (${tasksTotal})`                          },
-    { key: 'activities', label: `Activities (${acts.length})`                    },
+    { key: 'overview',   label: 'Overview'                                          },
+    { key: 'tasks',      label: `Tasks (${tasksTotal})`                             },
+    { key: 'activities', label: `Activities (${acts.length})`                       },
     { key: 'plan',       label: `Next Month (${report.nextMonthPlan.length + nmActs.length})` },
-    { key: 'reimb',      label: `Expenses (${report.reimbursements.length})`     },
+    { key: 'reimb',      label: `Expenses (${report.reimbursements.length})`        },
   ] as const;
 
   return (
@@ -692,15 +775,15 @@ const ReportDetail: React.FC<{
         <div className="dp-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ width: 44, height: 44, borderRadius: 12, background: AVATAR_GRADS[0], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
-              {initials(report.employee.name)}
+              {initials(empName(report))}
             </div>
             <div>
               <div style={{ fontSize: 9, fontFamily: 'DM Mono,monospace', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(167,139,250,0.6)', marginBottom: 3 }}>
                 Monthly Report · {MONTHS[report.month - 1]} {report.year}
               </div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>{report.employee.name}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>{empName(report)}</div>
               <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.28)', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>
-                {report.employee.email}{report.reportingManager && ` · Mgr: ${report.reportingManager.name}`}
+                {empEmail(report)}{report.reportingManager?.name ? ` · Mgr: ${report.reportingManager.name}` : ''}
               </div>
             </div>
           </div>
@@ -717,12 +800,12 @@ const ReportDetail: React.FC<{
 
         {/* Stats strip */}
         <div style={{ display: 'flex', gap: 8, padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexWrap: 'wrap' }}>
-          <Pill label="Tasks"      val={loadingActivities ? '…' : `${tasksDone}/${tasksTotal}`}  color={taskPct >= 70 ? '#34d399' : taskPct >= 40 ? '#fbbf24' : '#f87171'} />
-          <Pill label="Completion" val={loadingActivities ? '…' : `${taskPct}%`}                 color={taskPct >= 70 ? '#34d399' : taskPct >= 40 ? '#fbbf24' : '#f87171'} />
-          <Pill label="Activities" val={loadingActivities ? '…' : `${actDone}/${acts.length}`}   color="#60a5fa" />
-          <Pill label="Plans"      val={report.nextMonthPlan.length}                              color="#a78bfa" />
-          <Pill label="Next Acts"  val={nmActs.length}                                            color="#38bdf8" />
-          <Pill label="Expenses"   val={`₹${reimbTotal.toLocaleString('en-IN')}`}                color="#fb923c" />
+          <Pill label="Tasks"      val={loadingActivities ? '…' : `${tasksDone}/${tasksTotal}`} color={taskPct >= 70 ? '#34d399' : taskPct >= 40 ? '#fbbf24' : '#f87171'} />
+          <Pill label="Completion" val={loadingActivities ? '…' : `${taskPct}%`}                color={taskPct >= 70 ? '#34d399' : taskPct >= 40 ? '#fbbf24' : '#f87171'} />
+          <Pill label="Activities" val={loadingActivities ? '…' : `${actDone}/${acts.length}`}  color="#60a5fa" />
+          <Pill label="Plans"      val={report.nextMonthPlan.length}                             color="#a78bfa" />
+          <Pill label="Next Acts"  val={nmActs.length}                                           color="#38bdf8" />
+          <Pill label="Expenses"   val={`₹${reimbTotal.toLocaleString('en-IN')}`}               color="#fb923c" />
           {report.status === 'approved' && typeof report.adminScore === 'number' && (
             <Pill label="Score" val={`${report.adminScore}/100`} color="#34d399" />
           )}
@@ -865,7 +948,6 @@ const ReportDetail: React.FC<{
                               {task.endDate   && ` → ${fmt(task.endDate)}`}
                               {task.dueDate   && ` · Due ${fmt(task.dueDate)}`}
                             </div>
-                            {/* Live status badge from TaskList */}
                             {task.status && (
                               <span style={{ display: 'inline-flex', marginTop: 4, fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 100, background: task.status === 'Done' ? 'rgba(52,211,153,0.12)' : task.status === 'In Progress' ? 'rgba(96,165,250,0.12)' : 'rgba(251,191,36,0.12)', color: task.status === 'Done' ? '#34d399' : task.status === 'In Progress' ? '#60a5fa' : '#fbbf24' }}>
                                 {task.status}
@@ -923,7 +1005,7 @@ const ReportDetail: React.FC<{
                             {a.description && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 3 }}>{a.description}</div>}
                             <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.22)', fontFamily: 'DM Mono,monospace' }}>
                               {a.project?.name && `${a.project.name} · `}
-                              {a.task?.title && `${a.task.title} · `}
+                              {a.task?.title   && `${a.task.title} · `}
                               {a.activityType}
                               {a.startDate && ` · ${fmt(a.startDate)}`}
                               {a.endDate   && ` → ${fmt(a.endDate)}`}
@@ -950,7 +1032,7 @@ const ReportDetail: React.FC<{
                           <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: PRIORITY_COLOR[item.priority] + '18', color: PRIORITY_COLOR[item.priority], fontWeight: 500 }}>{item.priority}</span>
                         </div>
                         <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.2)', fontFamily: 'DM Mono,monospace', paddingLeft: 14, marginBottom: item.notes ? 4 : 0 }}>
-                          {item.projectName && `${item.projectName}`}
+                          {item.projectName  && `${item.projectName}`}
                           {item.assigneeName && ` · ${item.assigneeName}`}
                           {item.activityType && ` · ${item.activityType}`}
                           {item.startDate    && ` · ${fmt(item.startDate)}`}
@@ -1090,7 +1172,9 @@ export const AdminReportReview: React.FC = () => {
     setLoading(true);
     try {
       const res = await api.get(`/monthly-reports/team?month=${month}&year=${year}`);
-      setReports(Array.isArray(res.data) ? res.data : []);
+      // Filter out any reports where employee is null (orphaned records)
+      const data = Array.isArray(res.data) ? res.data.filter((r: MonthlyReport) => r.employee != null) : [];
+      setReports(data);
     } catch (err) {
       console.error(err);
       setReports([]);
@@ -1099,26 +1183,21 @@ export const AdminReportReview: React.FC = () => {
     }
   }, [month, year]);
 
-  // Initial fetch
   useEffect(() => { fetchReports(); }, [fetchReports]);
 
-  // ── Auto-refresh: 20s when reports need attention, 60s otherwise ──────────
+  // Auto-refresh: 20s when pending, 60s otherwise
   useEffect(() => {
-    const hasPending = reports.some(r =>
-      ['submitted', 'manager_reviewed'].includes(r.status)
-    );
-    const interval = hasPending ? 20_000 : 60_000;
+    const hasPending = reports.some(r => ['submitted', 'manager_reviewed'].includes(r.status));
+    const interval   = hasPending ? 20_000 : 60_000;
     const id = setInterval(() => {
       if (document.visibilityState === 'visible') fetchReports();
     }, interval);
     return () => clearInterval(id);
   }, [fetchReports, reports]);
 
-  // ── Refresh on tab focus / visibility change ──────────────────────────────
+  // Refresh on tab focus
   useEffect(() => {
-    const onFocus = () => {
-      if (document.visibilityState === 'visible') fetchReports();
-    };
+    const onFocus = () => { if (document.visibilityState === 'visible') fetchReports(); };
     document.addEventListener('visibilitychange', onFocus);
     window.addEventListener('focus', onFocus);
     return () => {
@@ -1127,22 +1206,14 @@ export const AdminReportReview: React.FC = () => {
     };
   }, [fetchReports]);
 
-  // ── BroadcastChannel: refresh when employee submits/saves ─────────────────
+  // BroadcastChannel: refresh when employee submits/saves
   useEffect(() => {
     let ch: BroadcastChannel;
     try {
       ch = new BroadcastChannel(SYNC_CHANNEL);
       ch.onmessage = (e) => {
-        if (
-          e.data?.type !== 'admin-updated' &&
-          e.data?.month === month &&
-          e.data?.year  === year
-        ) {
+        if (e.data?.type !== 'admin-updated' && e.data?.month === month && e.data?.year === year) {
           fetchReports();
-          setSelected(prev => {
-            if (prev && e.data?.userId) {}
-            return prev;
-          });
         }
       };
     } catch { /* BroadcastChannel not supported */ }
@@ -1155,10 +1226,14 @@ export const AdminReportReview: React.FC = () => {
   }, []);
 
   const filtered = reports.filter(r => {
+    if (!r.employee) return false; // safety guard
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
-      return r.employee.name.toLowerCase().includes(q) || r.employee.email.toLowerCase().includes(q);
+      return (
+        r.employee.name.toLowerCase().includes(q) ||
+        r.employee.email.toLowerCase().includes(q)
+      );
     }
     return true;
   });
@@ -1180,6 +1255,8 @@ export const AdminReportReview: React.FC = () => {
     try { await downloadPDF(reports, month, year); }
     finally { setPdfLoading(false); }
   };
+
+  const hasPending = reports.some(r => ['submitted', 'manager_reviewed'].includes(r.status));
 
   return (
     <>
@@ -1279,16 +1356,21 @@ export const AdminReportReview: React.FC = () => {
           <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.38 }}>
             <div className="arr-eyebrow">{isAdmin ? 'Admin Panel' : 'Manager Panel'} · {MONTHS[month - 1]} {year}</div>
             <h1 className="arr-title">Team <em>Report Review</em></h1>
-            <p className="arr-sub">Review, approve and score monthly submissions from your team. Auto-refreshes every {reports.some(r => ['submitted','manager_reviewed'].includes(r.status)) ? '20' : '60'}s.</p>
+            <p className="arr-sub">
+              Review, approve and score monthly submissions from your team. Auto-refreshes every {hasPending ? '20' : '60'}s.
+            </p>
           </motion.div>
 
           <motion.div className="arr-stats" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
             {[
-              { icon: <Users size={14} />,       bg: 'rgba(167,139,250,0.14)', c: '#a78bfa', num: stats.total,     label: 'Total'    },
-              { icon: <Send size={14} />,         bg: 'rgba(96,165,250,0.14)',  c: '#60a5fa', num: stats.submitted, label: 'Awaiting' },
-              { icon: <CheckCircle2 size={14} />, bg: 'rgba(52,211,153,0.14)', c: '#34d399', num: stats.approved,  label: 'Approved' },
-              { icon: <Clock size={14} />,        bg: 'rgba(251,191,36,0.14)', c: '#fbbf24', num: stats.pending,   label: 'Pending'  },
-              ...(stats.avgScore !== null ? [{ icon: <Star size={14} />, bg: 'rgba(251,146,60,0.14)', c: '#fb923c', num: `${stats.avgScore}`, label: 'Avg Score' }] : []),
+              { icon: <Users size={14} />,       bg: 'rgba(167,139,250,0.14)', c: '#a78bfa', num: stats.total,     label: 'Total'     },
+              { icon: <Send size={14} />,         bg: 'rgba(96,165,250,0.14)',  c: '#60a5fa', num: stats.submitted, label: 'Awaiting'  },
+              { icon: <CheckCircle2 size={14} />, bg: 'rgba(52,211,153,0.14)', c: '#34d399', num: stats.approved,  label: 'Approved'  },
+              { icon: <Clock size={14} />,        bg: 'rgba(251,191,36,0.14)', c: '#fbbf24', num: stats.pending,   label: 'Pending'   },
+              ...(stats.avgScore !== null
+                ? [{ icon: <Star size={14} />, bg: 'rgba(251,146,60,0.14)', c: '#fb923c', num: `${stats.avgScore}`, label: 'Avg Score' }]
+                : []
+              ),
             ].map((s, i) => (
               <motion.div key={s.label} className="arr-stat" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.13 + i * 0.06 }}>
                 <div className="arr-stat-icon" style={{ background: s.bg, color: s.c }}>{s.icon}</div>
@@ -1317,7 +1399,12 @@ export const AdminReportReview: React.FC = () => {
             </select>
             <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
               <Search size={13} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.22)', pointerEvents: 'none' }} />
-              <input style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'rgba(255,255,255,0.75)', fontFamily: 'DM Sans,sans-serif', fontSize: 13, padding: '9px 13px 9px 34px', outline: 'none' }} placeholder="Search employee…" value={search} onChange={e => setSearch(e.target.value)} />
+              <input
+                style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'rgba(255,255,255,0.75)', fontFamily: 'DM Sans,sans-serif', fontSize: 13, padding: '9px 13px 9px 34px', outline: 'none' }}
+                placeholder="Search employee…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
             </div>
             <button
               onClick={handlePDF}
@@ -1358,27 +1445,32 @@ export const AdminReportReview: React.FC = () => {
                       </td>
                     </tr>
                   ) : filtered.map((r, i) => {
+                    // r.employee is guaranteed non-null here (filtered above)
                     const done     = r.tasks.filter(t => taskIsDone(t)).length;
                     const total    = r.tasks.length;
                     const pct      = total ? Math.round(done / total * 100) : 0;
-                    const sm       = STATUS_META[r.status];
+                    const sm       = STATUS_META[r.status] ?? STATUS_META.draft;
                     const pColor   = pct >= 70 ? '#34d399' : pct >= 40 ? '#fbbf24' : '#f87171';
-                    const acts     = r.activities || [];
-                    const actDone  = acts.filter(a => a.status === 'Completed').length;
+                    const rActs    = r.activities || [];
+                    const rActDone = rActs.filter(a => a.status === 'Completed').length;
                     const reimbAmt = r.reimbursements.reduce((s, rb) => s + rb.amount, 0);
                     const nmPlans  = r.nextMonthPlan.length + (r.nextMonthActivities || []).length;
 
                     return (
-                      <motion.tr key={r._id} className="arr-tr"
-                        initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 + i * 0.04 }}
+                      <motion.tr
+                        key={r._id} className="arr-tr"
+                        initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.2 + i * 0.04 }}
                         onClick={() => setSelected(r)}
                       >
                         <td className="arr-td">
                           <div className="arr-emp">
-                            <div className="arr-av" style={{ background: AVATAR_GRADS[i % AVATAR_GRADS.length] }}>{initials(r.employee.name)}</div>
+                            <div className="arr-av" style={{ background: AVATAR_GRADS[i % AVATAR_GRADS.length] }}>
+                              {initials(empName(r))}
+                            </div>
                             <div>
-                              <div className="arr-name">{r.employee.name}</div>
-                              <div className="arr-email">{r.employee.email}</div>
+                              <div className="arr-name">{empName(r)}</div>
+                              <div className="arr-email">{empEmail(r)}</div>
                             </div>
                           </div>
                         </td>
@@ -1387,8 +1479,8 @@ export const AdminReportReview: React.FC = () => {
                           <div className="arr-prog"><div className="arr-prog-fill" style={{ width: `${pct}%`, background: pColor }} /></div>
                         </td>
                         <td className="arr-td hide-sm">
-                          {acts.length > 0
-                            ? <span style={{ fontSize: 12.5, color: '#60a5fa', fontFamily: 'DM Mono,monospace', fontWeight: 600 }}>{actDone}/{acts.length}</span>
+                          {rActs.length > 0
+                            ? <span style={{ fontSize: 12.5, color: '#60a5fa', fontFamily: 'DM Mono,monospace', fontWeight: 600 }}>{rActDone}/{rActs.length}</span>
                             : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontStyle: 'italic' }}>—</span>
                           }
                         </td>
@@ -1401,7 +1493,9 @@ export const AdminReportReview: React.FC = () => {
                           ) : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontStyle: 'italic' }}>—</span>}
                         </td>
                         <td className="arr-td hide-sm">
-                          {nmPlans > 0 ? <span style={{ fontSize: 12.5, color: '#a78bfa', fontFamily: 'DM Mono,monospace', fontWeight: 600 }}>{nmPlans}</span> : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontStyle: 'italic' }}>—</span>}
+                          {nmPlans > 0
+                            ? <span style={{ fontSize: 12.5, color: '#a78bfa', fontFamily: 'DM Mono,monospace', fontWeight: 600 }}>{nmPlans}</span>
+                            : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontStyle: 'italic' }}>—</span>}
                         </td>
                         <td className="arr-td">
                           <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 9px', borderRadius: 100, fontSize: 10.5, fontWeight: 500, background: sm.bg, color: sm.color, border: `1px solid ${sm.border}`, whiteSpace: 'nowrap' }}>{sm.label}</span>
@@ -1413,7 +1507,11 @@ export const AdminReportReview: React.FC = () => {
                           }
                         </td>
                         <td className="arr-td" style={{ textAlign: 'right' }}>
-                          <button onClick={e => { e.stopPropagation(); downloadEmployeePDF(r); }} className="arr-view-btn" style={{ background: 'rgba(251,146,60,0.1)', borderColor: 'rgba(251,146,60,0.3)', color: '#fb923c', marginRight: 8 }}>
+                          <button
+                            onClick={e => { e.stopPropagation(); downloadEmployeePDF(r); }}
+                            className="arr-view-btn"
+                            style={{ background: 'rgba(251,146,60,0.1)', borderColor: 'rgba(251,146,60,0.3)', color: '#fb923c', marginRight: 8 }}
+                          >
                             <Download size={12} /> PDF
                           </button>
                           <button className="arr-view-btn" onClick={e => { e.stopPropagation(); setSelected(r); }}>
