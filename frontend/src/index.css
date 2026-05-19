@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .card {
+    @apply bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-100 p-6 transition-all duration-300;
+  }
+  .btn-primary {
+    @apply bg-gradient-to-r from-brand-primary to-brand-secondary text-white px-6 py-2 rounded-xl font-semibold shadow-md hover:shadow-lg transform hover:scale-[1.02] transition-all;
+  }
+}
