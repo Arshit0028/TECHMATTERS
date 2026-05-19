@@ -616,7 +616,7 @@ const ReportDetail: React.FC<{
       .then(res => { if (res.data?._id) setReport(res.data); })
       .catch(err => console.error('Failed to load full report:', err))
       .finally(() => setLoadingActivities(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  
   }, [initialReport._id]);
 
   // Keep in sync when parent pushes updates
