@@ -113,7 +113,6 @@ const AVATAR_GRADS = [
 ];
 
 // ─── Safe string helpers ──────────────────────────────────────────────────────
-/** Safely extract a name from any nullable object */
 const safeName = (obj: { name?: string | null } | null | undefined, fallback = '—'): string =>
   obj?.name?.trim() || fallback;
 
@@ -122,14 +121,22 @@ const initials = (n?: string | null): string => {
   return n.split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'NA';
 };
 
-const fmt = (d?: string | null): string =>
-  d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+// ─── FIX: timezone-safe date formatter ────────────────────────────────────────
+// ISO strings like "2024-01-15T00:00:00.000Z" shift back 1 day in UTC+5:30
+// when parsed with `new Date()`. We extract the date part and treat it as local.
+const fmt = (d?: string | null): string => {
+  if (!d) return '—';
+  const datePart = typeof d === 'string' && d.includes('T') ? d.split('T')[0] : d;
+  const parts = datePart.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return '—';
+  const [y, m, day] = parts;
+  return new Date(y, m - 1, day).toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  });
+};
 
-/** Derive done-state safely */
-const taskIsDone = (t: TaskEntry): boolean =>
-  t.isDone ||
-  t.status === 'Done' || t.status === 'done' ||
-  t.status === 'Completed' || t.status === 'completed';
+/** Derive done-state solely from isDone on the report task — NOT task.status */
+const taskIsDone = (t: TaskEntry): boolean => t.isDone;
 
 /** Safe employee accessors — never throw on null employee */
 const empName  = (r: MonthlyReport): string => r.employee?.name?.trim()  || 'Unknown Employee';
@@ -696,7 +703,6 @@ const ReportDetail: React.FC<{
       .then(res => { if (res.data?._id) setReport(res.data); })
       .catch(err => console.error('Failed to load full report:', err))
       .finally(() => setLoadingActivities(false));
-  
   }, [initialReport._id]);
 
   useEffect(() => {
@@ -1167,7 +1173,6 @@ export const AdminReportReview: React.FC = () => {
   const isManager = ['manager', 'project-manager'].includes(user?.accessLevel || '');
   const YEARS     = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
-  /** Normalise a report so no downstream code ever sees null nested objects */
   const normalise = (r: MonthlyReport): MonthlyReport => ({
     ...r,
     tasks:               (r.tasks || []).map(t => ({
@@ -1202,12 +1207,10 @@ export const AdminReportReview: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  
   }, [month, year]);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
 
-  // Auto-refresh: 20s when pending, 60s otherwise
   useEffect(() => {
     const hasPending = reports.some(r => ['submitted', 'manager_reviewed'].includes(r.status));
     const interval   = hasPending ? 20_000 : 60_000;
@@ -1217,7 +1220,6 @@ export const AdminReportReview: React.FC = () => {
     return () => clearInterval(id);
   }, [fetchReports, reports]);
 
-  // Refresh on tab focus
   useEffect(() => {
     const onFocus = () => { if (document.visibilityState === 'visible') fetchReports(); };
     document.addEventListener('visibilitychange', onFocus);
@@ -1228,7 +1230,6 @@ export const AdminReportReview: React.FC = () => {
     };
   }, [fetchReports]);
 
-  // BroadcastChannel: refresh when employee submits/saves
   useEffect(() => {
     let ch: BroadcastChannel;
     try {
@@ -1243,12 +1244,10 @@ export const AdminReportReview: React.FC = () => {
   }, [fetchReports, month, year]);
 
   const onUpdated = useCallback((updated: MonthlyReport) => {
-    // Guard: never put a null-employee report into state
     if (!updated?.employee) return;
     const safe = normalise(updated);
     setReports(prev => prev.map(r => r._id === safe._id ? safe : r));
     setSelected(safe);
-  
   }, []);
 
   const filtered = reports.filter(r => {

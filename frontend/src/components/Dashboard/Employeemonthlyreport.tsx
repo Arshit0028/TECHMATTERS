@@ -111,12 +111,24 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string; bo
   rejected:         { label: 'Returned',     color: '#f87171', bg: 'rgba(248,113,113,0.1)',  border: 'rgba(248,113,113,0.25)' },
 };
 
-const fmt = (d?: string) =>
-  d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+// ─── FIX: timezone-safe date formatter ────────────────────────────────────────
+// ISO strings like "2024-01-15T00:00:00.000Z" shift back 1 day in UTC+5:30
+// when parsed with `new Date()`. We extract the date part and treat it as local.
+const fmt = (d?: string | null): string => {
+  if (!d) return '—';
+  const datePart = typeof d === 'string' && d.includes('T') ? d.split('T')[0] : d;
+  const parts = datePart.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return '—';
+  const [y, m, day] = parts;
+  return new Date(y, m - 1, day).toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  });
+};
 
 const prevMonth   = (m: number, y: number) => m === 1  ? { m: 12, y: y - 1 } : { m: m - 1, y };
 const nextMonthOf = (m: number, y: number) => m === 12 ? { m: 1,  y: y + 1 } : { m: m + 1, y };
 
+// ─── Merge helper ─────────────────────────────────────────────────────────────
 const mergeTasksWithReport = (
   allTasks: TaskEntry[],
   reportTasks: TaskEntry[],
@@ -195,7 +207,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
   const [error,      setError]      = useState('');
   const [toast,      setToast]      = useState('');
 
-  // ── Plan state — refs shadow state so callbacks always read latest values ──
   const [planItems,    setPlanItems]    = useState<NextMonthPlanItem[]>([]);
   const [planFreeText, setPlanFreeText] = useState('');
   const [planDirty,    setPlanDirty]    = useState(false);
@@ -217,10 +228,12 @@ export const EmployeeMonthlyReport: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'last' | 'this' | 'next'>('this');
 
   const [savingTaskIds, setSavingTaskIds] = useState<Set<string>>(new Set());
+
+  // ─── FIX: pendingToggles tracks in-flight task toggle requests ────────────
   const pendingToggles = useRef<Map<string, boolean>>(new Map());
   const confirmedLinkedTaskIds = useRef<Set<string>>(new Set());
+  const togglesInFlight = useRef(false);
 
-  // ── Track last-known status so we can toast on admin-driven changes ──────
   const lastKnownStatus = useRef<string | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -241,7 +254,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
   const actDone = useMemo(() => activities.filter(a => a.status === 'Completed').length, [activities]);
   const YEARS   = useMemo(() => [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1], []);
 
-  // ── Sync plan state from a fresh report ───────────────────────────────────
   const syncPlanFromReport = useCallback((r: MonthlyReport) => {
     const items = r.nextMonthPlan ?? [];
     const free  = r.nextMonthFreeText ?? '';
@@ -256,6 +268,18 @@ export const EmployeeMonthlyReport: React.FC = () => {
   const applyFetchedTasks = useCallback((r: MonthlyReport, tasks: TaskEntry[]): MonthlyReport => {
     if (!tasks.length) return r;
     return { ...r, tasks: mergeTasksWithReport(tasks, r.tasks) };
+  }, []);
+
+  const createReportInternal = useCallback(async (m: number, y: number): Promise<MonthlyReport | null> => {
+    try {
+      const res = await api.post('/monthly-reports', { month: m, year: y });
+      return res.data as MonthlyReport;
+    } catch (e: any) {
+      if (e?.response?.status === 409 || (e?.response?.data?.msg || '').toLowerCase().includes('exist')) {
+        return null;
+      }
+      throw e;
+    }
   }, []);
 
   // ── Core fetch ────────────────────────────────────────────────────────────
@@ -286,7 +310,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
       if (thisRes.status === 'fulfilled') {
         const r: MonthlyReport = thisRes.value.data;
 
-        // Detect admin-driven status change and toast the employee
         if (lastKnownStatus.current && lastKnownStatus.current !== r.status) {
           const statusMessages: Record<string, string> = {
             approved:         '🎉 Your report has been approved!',
@@ -300,7 +323,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
 
         let mergedReport = r;
         try {
-          const tasksRes = await api.get(`/tasks?month=${month}&year=${year}&assignee=${user?._id}`);
+          const tasksRes = await api.get(`/tasks?assignee=${user?._id}`);
           const allTasks: TaskEntry[] = Array.isArray(tasksRes.data)
             ? tasksRes.data
             : Array.isArray(tasksRes.data?.data)  ? tasksRes.data.data
@@ -310,15 +333,27 @@ export const EmployeeMonthlyReport: React.FC = () => {
           setFetchedTasks(allTasks);
           fetchedTasksRef.current = allTasks;
 
-          if (allTasks.length > 0 && r._id) {
-            try {
-              await api.patch(`/monthly-reports/${r._id}/link-tasks`, {
-                taskIds: allTasks.map((t: TaskEntry) => t._id),
-              });
-              allTasks.forEach((t: TaskEntry) => confirmedLinkedTaskIds.current.add(t._id));
-              const refreshed = await api.get(`/monthly-reports/mine?month=${month}&year=${year}`);
-              mergedReport = applyFetchedTasks(refreshed.data, allTasks);
-            } catch {
+          // ─── FIX: Only run link-tasks when no toggle PATCHes are in flight ──
+          const canLink = allTasks.length > 0 && r._id && !togglesInFlight.current;
+
+          if (canLink) {
+            const newTaskIds = allTasks
+              .map(t => t._id)
+              .filter(id => !confirmedLinkedTaskIds.current.has(id));
+
+            if (newTaskIds.length > 0) {
+              try {
+                const existingIds = (r.tasks || []).map(t => t._id);
+                // ─── FIX TS2802: use Array.from instead of spread on Set ────
+                const allIds = Array.from(new Set(existingIds));
+                await api.patch(`/monthly-reports/${r._id}/link-tasks`, { taskIds: allIds });
+                allTasks.forEach(t => confirmedLinkedTaskIds.current.add(t._id));
+                const refreshed = await api.get(`/monthly-reports/mine?month=${month}&year=${year}`);
+                mergedReport = applyFetchedTasks(refreshed.data, allTasks);
+              } catch {
+                mergedReport = applyFetchedTasks(r, allTasks);
+              }
+            } else {
               mergedReport = applyFetchedTasks(r, allTasks);
             }
           } else {
@@ -329,6 +364,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
           fetchedTasksRef.current = [];
         }
 
+        // ─── FIX: Re-apply any pending toggle states on top of server data ──
         if (pendingToggles.current.size > 0) {
           mergedReport = {
             ...mergedReport,
@@ -356,14 +392,38 @@ export const EmployeeMonthlyReport: React.FC = () => {
       } else {
         const reason = thisRes.reason;
         if (reason?.response?.status === 404) {
-          setReport(null);
-          reportRef.current = null;
-          lastKnownStatus.current = null;
-          setFetchedTasks([]);
-          fetchedTasksRef.current = [];
-          syncPlanFromReport({ nextMonthPlan: [], nextMonthFreeText: '' } as any);
-          if (reimbRes.status === 'fulfilled') {
-            setMyReimbs(reimbRes.value.data?.data ?? []);
+          const nowDate = new Date();
+          const isCurrentMonth = month === nowDate.getMonth() + 1 && year === nowDate.getFullYear();
+          if (isCurrentMonth && !silent) {
+            try {
+              const created = await createReportInternal(month, year);
+              if (created) {
+                const withTasks = applyFetchedTasks(created, fetchedTasksRef.current);
+                setReport(withTasks);
+                reportRef.current = withTasks;
+                lastKnownStatus.current = withTasks.status;
+                syncPlanFromReport(withTasks);
+                showToast('📋 Report created for this month');
+                broadcast({ type: 'employee-updated', userId: user?._id, month, year });
+              } else {
+                await fetchAll(false);
+                return;
+              }
+            } catch {
+              setReport(null);
+              reportRef.current = null;
+              lastKnownStatus.current = null;
+            }
+          } else {
+            setReport(null);
+            reportRef.current = null;
+            lastKnownStatus.current = null;
+            setFetchedTasks([]);
+            fetchedTasksRef.current = [];
+            syncPlanFromReport({ nextMonthPlan: [], nextMonthFreeText: '' } as any);
+            if (reimbRes.status === 'fulfilled') {
+              setMyReimbs(reimbRes.value.data?.data ?? []);
+            }
           }
         } else {
           setError('Could not load report for this month.');
@@ -377,8 +437,9 @@ export const EmployeeMonthlyReport: React.FC = () => {
         setActivities(all.filter(a => {
           const ref = a.startDate || a.endDate;
           if (!ref) return true;
-          const d = new Date(ref);
-          return d.getFullYear() === year && d.getMonth() + 1 === month;
+          const datePart = ref.includes('T') ? ref.split('T')[0] : ref;
+          const [y2, m2] = datePart.split('-').map(Number);
+          return y2 === year && m2 === month;
         }));
       }
     } catch (e: any) {
@@ -387,14 +448,12 @@ export const EmployeeMonthlyReport: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [month, year, user?._id, applyFetchedTasks, syncPlanFromReport, showToast]);
+  }, [month, year, user?._id, applyFetchedTasks, syncPlanFromReport, showToast, createReportInternal]);
 
-  // ── Initial load ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (user?._id) fetchAll(false);
   }, [fetchAll, user?._id]);
 
-  // ── Visibility / focus refresh ────────────────────────────────────────────
   useEffect(() => {
     const onFocus = () => {
       if (user?._id && document.visibilityState === 'visible') fetchAll(true);
@@ -407,10 +466,8 @@ export const EmployeeMonthlyReport: React.FC = () => {
     };
   }, [fetchAll, user?._id]);
 
-  // ── Smart polling: fast when submitted/reviewed, slow otherwise ───────────
   useEffect(() => {
     if (!report) return;
-    // Poll faster while waiting for admin/manager action, slower otherwise
     const needsFast = ['submitted', 'manager_reviewed'].includes(report.status);
     const interval  = needsFast ? 20_000 : 60_000;
     const id = setInterval(() => {
@@ -419,13 +476,11 @@ export const EmployeeMonthlyReport: React.FC = () => {
     return () => clearInterval(id);
   }, [report?.status, fetchAll]);
 
-  // ── BroadcastChannel: listen for admin updates ────────────────────────────
   useEffect(() => {
     let ch: BroadcastChannel;
     try {
       ch = new BroadcastChannel(SYNC_CHANNEL);
       ch.onmessage = (e) => {
-        // Only react to admin-side events (not our own broadcasts)
         if (
           e.data?.type === 'admin-updated' &&
           e.data?.month === month &&
@@ -438,7 +493,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
     return () => { try { ch?.close(); } catch {} };
   }, [fetchAll, month, year]);
 
-  // ── Ensure task is linked before patching ─────────────────────────────────
   const ensureTaskInReport = useCallback(async (task: TaskEntry): Promise<MonthlyReport> => {
     const currentReport = reportRef.current;
     if (!currentReport) throw new Error('No report loaded');
@@ -457,13 +511,14 @@ export const EmployeeMonthlyReport: React.FC = () => {
     return updatedReport;
   }, [applyFetchedTasks]);
 
-  // ── Task toggle ───────────────────────────────────────────────────────────
+  // ─── FIX: Task toggle with proper in-flight guard ─────────────────────────
   const toggleTask = useCallback(async (task: TaskEntry) => {
     if (!reportRef.current || !canEdit) return;
     if (savingTaskIds.has(task._id)) return;
 
     const newIsDone = !task.isDone;
     pendingToggles.current.set(task._id, newIsDone);
+    togglesInFlight.current = true;
 
     setReport(prev => {
       if (!prev) return prev;
@@ -497,7 +552,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
         return updated;
       });
       showToast(newIsDone ? '✅ Task marked done' : '↩️ Task marked incomplete');
-      // Notify admin panel
       broadcast({ type: 'employee-updated', userId: user?._id, month, year });
     } catch (e: any) {
       pendingToggles.current.delete(task._id);
@@ -517,6 +571,9 @@ export const EmployeeMonthlyReport: React.FC = () => {
         return next;
       });
       pendingToggles.current.delete(task._id);
+      if (pendingToggles.current.size === 0) {
+        togglesInFlight.current = false;
+      }
     }
   }, [canEdit, savingTaskIds, ensureTaskInReport, applyFetchedTasks, showToast, month, year, user?._id]);
 
@@ -581,7 +638,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
     setPlanDirty(true);
   };
 
-  // ── Plan save ─────────────────────────────────────────────────────────────
   const savePlan = useCallback(async () => {
     if (!reportRef.current || !planDirtyRef.current) return;
 
@@ -627,7 +683,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
     }
   }, [applyFetchedTasks, showToast, month, year, user?._id]);
 
-  // ── Reimb link/unlink ─────────────────────────────────────────────────────
   const linkReimb = useCallback(async (reimb: Reimbursement) => {
     if (!reportRef.current) return;
     const ids = [
@@ -665,7 +720,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
     }
   }, [applyFetchedTasks, fetchAll, showToast, month, year, user?._id]);
 
-  // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
     if (!reportRef.current) return;
     const missing = reportRef.current.tasks.filter(t => !t.isDone && !t.undoneNote?.trim());
@@ -684,7 +738,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
       reportRef.current = updated;
       lastKnownStatus.current = updated.status;
       showToast('✅ Report submitted!');
-      // Immediately notify admin dashboard
       broadcast({ type: 'employee-updated', userId: user?._id, month, year });
     } catch (e: any) {
       setError(e?.response?.data?.msg || 'Submit failed');
@@ -693,7 +746,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
     }
   }, [savePlan, applyFetchedTasks, showToast, month, year, user?._id]);
 
-  // ── Create report ─────────────────────────────────────────────────────────
   const createReport = useCallback(async () => {
     try {
       const res = await api.post('/monthly-reports', { month, year });
@@ -745,7 +797,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
         .emr-sel option { background: #12121e; }
         .emr-status { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 100px; font-size: 11.5px; font-weight: 500; }
 
-        /* Live indicator dot */
         .emr-live { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: rgba(52,211,153,0.55); font-family: 'DM Mono', monospace; letter-spacing: 0.04em; }
         .emr-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; animation: emr-pulse 2s ease-in-out infinite; }
         @keyframes emr-pulse { 0%,100% { opacity: 0.4; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.15); } }
@@ -784,30 +835,29 @@ export const EmployeeMonthlyReport: React.FC = () => {
         .task-title { font-size: 13.5px; color: rgba(255,255,255,0.8); font-weight: 500; line-height: 1.4; }
         .task-title.done { text-decoration: line-through; color: rgba(255,255,255,0.3); }
         .task-meta { font-size: 10.5px; color: rgba(255,255,255,0.22); font-family: 'DM Mono', monospace; margin-top: 3px; }
-        .task-note-label { font-size: 10px; color: rgba(255,255,255,0.28); font-family: 'DM Mono', monospace; letter-spacing: 0.06em; text-transform: uppercase; margin: 7px 0 4px; }
-        .task-note-area { width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; color: rgba(255,255,255,0.72); font-family: 'DM Sans', sans-serif; font-size: 12.5px; padding: 7px 11px; resize: none; outline: none; transition: border-color 0.2s; }
-        .task-note-area:focus { border-color: rgba(167,139,250,0.32); }
-        .task-note-area::placeholder { color: rgba(255,255,255,0.15); }
+        .task-note-label { font-size: 10px; font-family: 'DM Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.28); margin-top: 8px; margin-bottom: 4px; }
+        .task-note-area { width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 9px; color: rgba(255,255,255,0.6); font-family: 'DM Sans', sans-serif; font-size: 12px; padding: 8px 11px; resize: none; outline: none; transition: border-color 0.2s; }
+        .task-note-area:focus { border-color: rgba(167,139,250,0.3); }
+        .task-note-area::placeholder { color: rgba(255,255,255,0.14); }
         .task-note-area:disabled { opacity: 0.4; cursor: not-allowed; }
 
         .act-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
         .act-row:last-child { border-bottom: none; }
         .act-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-        .act-name { font-size: 13px; color: rgba(255,255,255,0.75); flex: 1; font-weight: 500; }
+        .act-name { font-size: 13px; color: rgba(255,255,255,0.8); font-weight: 500; }
         .act-meta { font-size: 10.5px; color: rgba(255,255,255,0.22); font-family: 'DM Mono', monospace; margin-top: 2px; }
-        .act-badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 100px; white-space: nowrap; }
+        .act-badge { font-size: 10px; padding: 2px 8px; border-radius: 100px; font-weight: 500; white-space: nowrap; }
 
-        .plan-item { background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.06); border-radius: 13px; padding: 14px 14px 12px; margin-bottom: 10px; position: relative; }
-        .plan-field-row { display: grid; gap: 8px; margin-bottom: 8px; }
-        .plan-field-row-2 { grid-template-columns: 1fr 1fr; }
-        .plan-field-row-3 { grid-template-columns: 1fr 1fr 1fr; }
-        .plan-field-row-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
-        .plan-field-label { font-size: 9.5px; font-family: 'DM Mono', monospace; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.28); margin-bottom: 4px; display: flex; align-items: center; gap: 4px; }
-        .plan-inp { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 9px; color: rgba(255,255,255,0.82); font-family: 'DM Sans', sans-serif; font-size: 13px; padding: 8px 11px; outline: none; transition: border-color 0.2s; }
-        .plan-inp:focus { border-color: rgba(167,139,250,0.4); background: rgba(255,255,255,0.07); }
+        .plan-item { position: relative; background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
+        .plan-field-label { font-size: 9px; font-family: 'DM Mono', monospace; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.25); margin-bottom: 5px; display: flex; align-items: center; gap: 4px; }
+        .plan-field-row { display: grid; gap: 10px; }
+        .plan-field-row-4 { grid-template-columns: repeat(4, 1fr); }
+        .plan-field-row-3 { grid-template-columns: repeat(3, 1fr); }
+        .plan-field-row-2 { grid-template-columns: repeat(2, 1fr); }
+        .plan-inp { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 9px; color: rgba(255,255,255,0.78); font-family: 'DM Sans', sans-serif; font-size: 13px; padding: 8px 11px; outline: none; transition: border-color 0.2s; }
+        .plan-inp:focus { border-color: rgba(167,139,250,0.4); }
         .plan-inp::placeholder { color: rgba(255,255,255,0.16); }
         .plan-inp:disabled { opacity: 0.4; cursor: not-allowed; }
-        input[type='date'].plan-inp::-webkit-calendar-picker-indicator { filter: invert(0.4); cursor: pointer; }
         .plan-sel { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 9px; color: rgba(255,255,255,0.78); font-family: 'DM Sans', sans-serif; font-size: 13px; padding: 8px 11px; outline: none; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.3)' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; transition: border-color 0.2s; }
         .plan-sel:focus { border-color: rgba(167,139,250,0.4); }
         .plan-sel option { background: #12121e; }
@@ -894,7 +944,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
                 {sm.label}
               </span>
             )}
-            {/* Live sync indicator */}
             <span className="emr-live" title="Updates automatically when admin/manager acts on your report">
               <span className="emr-live-dot" />
               Live
@@ -1068,7 +1117,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                       <div className="empty-state" style={{ padding: '4rem 0' }}>
                         <FileText size={36} style={{ opacity: 0.1 }} />
                         <span>No report found for this month</span>
-                        <button className="btn btn-primary" onClick={createReport}><Plus size={16} /> Create New Report</button>
+                        <button className="btn btn-primary" onClick={createReport}><Plus size={16} /> Create Report</button>
                         <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', maxWidth: 280, textAlign: 'center' }}>Start tracking your tasks, activities, and plan for next month.</p>
                       </div>
                     ) : (
