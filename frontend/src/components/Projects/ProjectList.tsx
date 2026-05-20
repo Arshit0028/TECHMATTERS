@@ -711,7 +711,7 @@ export const ProjectList: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Progress bar */}
+                      {/* Progress bar
                       <div className="pl-prog-wrap">
                         <div className="pl-prog-row">
                           <span className="pl-prog-label">
@@ -727,7 +727,7 @@ export const ProjectList: React.FC = () => {
                             Last: {lastUpdate.note?.slice(0, 40)}{lastUpdate.note?.length > 40 ? '…' : ''} · {timeAgo(lastUpdate.createdAt)}
                           </div>
                         )}
-                      </div>
+                      </div> */}
 
                       {/* Meta */}
                       <div className="pl-meta">
