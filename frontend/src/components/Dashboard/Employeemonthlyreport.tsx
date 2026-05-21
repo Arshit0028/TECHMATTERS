@@ -111,9 +111,7 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string; bo
   rejected:         { label: 'Returned',     color: '#f87171', bg: 'rgba(248,113,113,0.1)',  border: 'rgba(248,113,113,0.25)' },
 };
 
-// ─── FIX: timezone-safe date formatter ────────────────────────────────────────
-// ISO strings like "2024-01-15T00:00:00.000Z" shift back 1 day in UTC+5:30
-// when parsed with `new Date()`. We extract the date part and treat it as local.
+// ─── Timezone-safe date formatter ─────────────────────────────────────────────
 const fmt = (d?: string | null): string => {
   if (!d) return '—';
   const datePart = typeof d === 'string' && d.includes('T') ? d.split('T')[0] : d;
@@ -229,8 +227,15 @@ export const EmployeeMonthlyReport: React.FC = () => {
 
   const [savingTaskIds, setSavingTaskIds] = useState<Set<string>>(new Set());
 
-  // ─── FIX: pendingToggles tracks in-flight task toggle requests ────────────
+  // ─── pendingToggles: tracks in-flight PATCH requests ─────────────────────
   const pendingToggles = useRef<Map<string, boolean>>(new Map());
+
+  // ─── FIX: userToggles — permanent source of truth for user intent ─────────
+  // Persists across ALL fetchAll calls. Set on user action, cleared only after
+  // the server PATCH confirms success (or reverts on error). This prevents any
+  // background fetch from overwriting what the user explicitly checked/unchecked.
+  const userToggles = useRef<Map<string, boolean>>(new Map());
+
   const confirmedLinkedTaskIds = useRef<Set<string>>(new Set());
   const togglesInFlight = useRef(false);
 
@@ -268,6 +273,20 @@ export const EmployeeMonthlyReport: React.FC = () => {
   const applyFetchedTasks = useCallback((r: MonthlyReport, tasks: TaskEntry[]): MonthlyReport => {
     if (!tasks.length) return r;
     return { ...r, tasks: mergeTasksWithReport(tasks, r.tasks) };
+  }, []);
+
+  // ─── FIX: applyUserToggles ────────────────────────────────────────────────
+  // Always layers user-confirmed toggle states on top of any server data.
+  // Must be called on every setReport that originates from a server response.
+  const applyUserToggles = useCallback((r: MonthlyReport): MonthlyReport => {
+    if (userToggles.current.size === 0) return r;
+    return {
+      ...r,
+      tasks: r.tasks.map(t => {
+        const override = userToggles.current.get(t._id);
+        return override !== undefined ? { ...t, isDone: override } : t;
+      }),
+    };
   }, []);
 
   const createReportInternal = useCallback(async (m: number, y: number): Promise<MonthlyReport | null> => {
@@ -333,7 +352,6 @@ export const EmployeeMonthlyReport: React.FC = () => {
           setFetchedTasks(allTasks);
           fetchedTasksRef.current = allTasks;
 
-          // ─── FIX: Only run link-tasks when no toggle PATCHes are in flight ──
           const canLink = allTasks.length > 0 && r._id && !togglesInFlight.current;
 
           if (canLink) {
@@ -344,27 +362,32 @@ export const EmployeeMonthlyReport: React.FC = () => {
             if (newTaskIds.length > 0) {
               try {
                 const existingIds = (r.tasks || []).map(t => t._id);
-                // ─── FIX TS2802: use Array.from instead of spread on Set ────
                 const allIds = Array.from(new Set(existingIds));
                 await api.patch(`/monthly-reports/${r._id}/link-tasks`, { taskIds: allIds });
                 allTasks.forEach(t => confirmedLinkedTaskIds.current.add(t._id));
                 const refreshed = await api.get(`/monthly-reports/mine?month=${month}&year=${year}`);
-                mergedReport = applyFetchedTasks(refreshed.data, allTasks);
+                // ─── FIX: apply user toggles on top of refreshed server data ──
+                mergedReport = applyUserToggles(applyFetchedTasks(refreshed.data, allTasks));
               } catch {
-                mergedReport = applyFetchedTasks(r, allTasks);
+                // ─── FIX: apply user toggles on fallback path too ─────────────
+                mergedReport = applyUserToggles(applyFetchedTasks(r, allTasks));
               }
             } else {
-              mergedReport = applyFetchedTasks(r, allTasks);
+              // ─── FIX: apply user toggles ──────────────────────────────────
+              mergedReport = applyUserToggles(applyFetchedTasks(r, allTasks));
             }
           } else {
-            mergedReport = applyFetchedTasks(r, allTasks);
+            // ─── FIX: apply user toggles ──────────────────────────────────
+            mergedReport = applyUserToggles(applyFetchedTasks(r, allTasks));
           }
         } catch {
           setFetchedTasks([]);
           fetchedTasksRef.current = [];
+          // ─── FIX: still apply user toggles even if tasks fetch failed ─────
+          mergedReport = applyUserToggles(r);
         }
 
-        // ─── FIX: Re-apply any pending toggle states on top of server data ──
+        // Re-apply any pending toggle states on top (belt-and-suspenders)
         if (pendingToggles.current.size > 0) {
           mergedReport = {
             ...mergedReport,
@@ -398,7 +421,8 @@ export const EmployeeMonthlyReport: React.FC = () => {
             try {
               const created = await createReportInternal(month, year);
               if (created) {
-                const withTasks = applyFetchedTasks(created, fetchedTasksRef.current);
+                // ─── FIX: apply user toggles on newly created report ──────────
+                const withTasks = applyUserToggles(applyFetchedTasks(created, fetchedTasksRef.current));
                 setReport(withTasks);
                 reportRef.current = withTasks;
                 lastKnownStatus.current = withTasks.status;
@@ -448,7 +472,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [month, year, user?._id, applyFetchedTasks, syncPlanFromReport, showToast, createReportInternal]);
+  }, [month, year, user?._id, applyFetchedTasks, applyUserToggles, syncPlanFromReport, showToast, createReportInternal]);
 
   useEffect(() => {
     if (user?._id) fetchAll(false);
@@ -504,22 +528,28 @@ export const EmployeeMonthlyReport: React.FC = () => {
     const res = await api.patch(`/monthly-reports/${currentReport._id}/link-tasks`, {
       taskIds: allIds,
     });
-    const updatedReport: MonthlyReport = applyFetchedTasks(res.data, fetchedTasksRef.current);
+    // ─── FIX: apply user toggles after link-tasks response ───────────────────
+    const updatedReport: MonthlyReport = applyUserToggles(applyFetchedTasks(res.data, fetchedTasksRef.current));
     (updatedReport.tasks || []).forEach(t => confirmedLinkedTaskIds.current.add(t._id));
     setReport(updatedReport);
     reportRef.current = updatedReport;
     return updatedReport;
-  }, [applyFetchedTasks]);
+  }, [applyFetchedTasks, applyUserToggles]);
 
-  // ─── FIX: Task toggle with proper in-flight guard ─────────────────────────
+  // ─── FIX: Task toggle with userToggles as persistent source of truth ──────
   const toggleTask = useCallback(async (task: TaskEntry) => {
     if (!reportRef.current || !canEdit) return;
     if (savingTaskIds.has(task._id)) return;
 
     const newIsDone = !task.isDone;
+
+    // ─── Step 1: Record user intent persistently BEFORE anything async ───────
+    // This map survives all background fetchAll calls until server confirms.
+    userToggles.current.set(task._id, newIsDone);
     pendingToggles.current.set(task._id, newIsDone);
     togglesInFlight.current = true;
 
+    // ─── Step 2: Optimistic UI update ────────────────────────────────────────
     setReport(prev => {
       if (!prev) return prev;
       const updated = {
@@ -538,22 +568,31 @@ export const EmployeeMonthlyReport: React.FC = () => {
         `/monthly-reports/${linkedReport._id}/tasks/${task._id}`,
         { isDone: newIsDone, title: task.title },
       );
+
+      // ─── Step 3: Merge server response, but userToggles always wins ──────
       setReport(prev => {
-        if (!prev) return applyFetchedTasks(res.data, fetchedTasksRef.current);
+        if (!prev) return applyUserToggles(applyFetchedTasks(res.data, fetchedTasksRef.current));
         const serverTaskMap = new Map((res.data.tasks || []).map((t: TaskEntry) => [t._id, t]));
         const mergedTasks = prev.tasks.map(t => {
           const srv = serverTaskMap.get(t._id) as TaskEntry | undefined;
           if (!srv) return t;
-          const pendingVal = pendingToggles.current.get(t._id);
-          return { ...srv, isDone: pendingVal !== undefined ? pendingVal : srv.isDone };
+          // userToggles takes priority over server value
+          const override = userToggles.current.get(t._id);
+          return { ...srv, isDone: override !== undefined ? override : srv.isDone };
         });
         const updated = { ...res.data, tasks: mergedTasks };
         reportRef.current = updated;
         return updated;
       });
+
+      // ─── Step 4: Server confirmed — safe to remove from userToggles ──────
+      userToggles.current.delete(task._id);
+
       showToast(newIsDone ? '✅ Task marked done' : '↩️ Task marked incomplete');
       broadcast({ type: 'employee-updated', userId: user?._id, month, year });
     } catch (e: any) {
+      // ─── Step 5: On error — remove from userToggles and revert UI ─────────
+      userToggles.current.delete(task._id);
       pendingToggles.current.delete(task._id);
       setReport(prev => {
         const reverted = prev ? {
@@ -575,7 +614,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
         togglesInFlight.current = false;
       }
     }
-  }, [canEdit, savingTaskIds, ensureTaskInReport, applyFetchedTasks, showToast, month, year, user?._id]);
+  }, [canEdit, savingTaskIds, ensureTaskInReport, applyFetchedTasks, applyUserToggles, showToast, month, year, user?._id]);
 
   const saveTaskNote = useCallback(async (task: TaskEntry, field: 'doneNote' | 'undoneNote', value: string) => {
     if (!reportRef.current || !canEdit) return;
@@ -589,14 +628,15 @@ export const EmployeeMonthlyReport: React.FC = () => {
         `/monthly-reports/${linkedReport._id}/tasks/${task._id}`,
         { [field]: value, title: task.title },
       );
+      // ─── FIX: apply user toggles after note save response ────────────────
       setReport(prev => {
-        if (!prev) return applyFetchedTasks(res.data, fetchedTasksRef.current);
+        if (!prev) return applyUserToggles(applyFetchedTasks(res.data, fetchedTasksRef.current));
         const serverTaskMap = new Map((res.data.tasks || []).map((t: TaskEntry) => [t._id, t]));
         const mergedTasks = prev.tasks.map(t => {
           const srv = serverTaskMap.get(t._id) as TaskEntry | undefined;
           if (!srv) return t;
-          const pendingVal = pendingToggles.current.get(t._id);
-          return { ...srv, isDone: pendingVal !== undefined ? pendingVal : srv.isDone };
+          const override = userToggles.current.get(t._id);
+          return { ...srv, isDone: override !== undefined ? override : srv.isDone };
         });
         const updated = { ...res.data, tasks: mergedTasks };
         reportRef.current = updated;
@@ -604,7 +644,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
       });
       broadcast({ type: 'employee-updated', userId: user?._id, month, year });
     } catch { /* optimistic state already applied */ }
-  }, [canEdit, ensureTaskInReport, applyFetchedTasks, month, year, user?._id]);
+  }, [canEdit, ensureTaskInReport, applyFetchedTasks, applyUserToggles, month, year, user?._id]);
 
   // ── Plan helpers ──────────────────────────────────────────────────────────
   const addPlanItem = () => {
@@ -662,7 +702,8 @@ export const EmployeeMonthlyReport: React.FC = () => {
         nextMonthPlan:     safePlanItems,
         nextMonthFreeText: safeFreeText,
       };
-      const updated = applyFetchedTasks(merged, fetchedTasksRef.current);
+      // ─── FIX: apply user toggles after plan save ──────────────────────────
+      const updated = applyUserToggles(applyFetchedTasks(merged, fetchedTasksRef.current));
 
       setReport(updated);
       reportRef.current = updated;
@@ -681,7 +722,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [applyFetchedTasks, showToast, month, year, user?._id]);
+  }, [applyFetchedTasks, applyUserToggles, showToast, month, year, user?._id]);
 
   const linkReimb = useCallback(async (reimb: Reimbursement) => {
     if (!reportRef.current) return;
@@ -691,7 +732,8 @@ export const EmployeeMonthlyReport: React.FC = () => {
     ];
     try {
       const res = await api.patch(`/monthly-reports/${reportRef.current._id}/link-reimbursements`, { reimbursementIds: ids });
-      const updated = applyFetchedTasks(res.data, fetchedTasksRef.current);
+      // ─── FIX: apply user toggles after reimbursement link ────────────────
+      const updated = applyUserToggles(applyFetchedTasks(res.data, fetchedTasksRef.current));
       setReport(updated);
       reportRef.current = updated;
       setMyReimbs(prev => prev.filter(r => r._id !== reimb._id));
@@ -700,7 +742,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
     } catch (e: any) {
       showToast('❌ ' + (e?.response?.data?.msg || 'Failed'));
     }
-  }, [applyFetchedTasks, showToast, month, year, user?._id]);
+  }, [applyFetchedTasks, applyUserToggles, showToast, month, year, user?._id]);
 
   const unlinkReimb = useCallback(async (reimbId: string) => {
     if (!reportRef.current) return;
@@ -709,7 +751,8 @@ export const EmployeeMonthlyReport: React.FC = () => {
       .filter((id: string) => id !== reimbId);
     try {
       const res = await api.patch(`/monthly-reports/${reportRef.current._id}/link-reimbursements`, { reimbursementIds: ids });
-      const updated = applyFetchedTasks(res.data, fetchedTasksRef.current);
+      // ─── FIX: apply user toggles after reimbursement unlink ──────────────
+      const updated = applyUserToggles(applyFetchedTasks(res.data, fetchedTasksRef.current));
       setReport(updated);
       reportRef.current = updated;
       showToast('✅ Removed');
@@ -718,7 +761,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
     } catch (e: any) {
       showToast('❌ ' + (e?.response?.data?.msg || 'Failed'));
     }
-  }, [applyFetchedTasks, fetchAll, showToast, month, year, user?._id]);
+  }, [applyFetchedTasks, applyUserToggles, fetchAll, showToast, month, year, user?._id]);
 
   const handleSubmit = useCallback(async () => {
     if (!reportRef.current) return;
@@ -733,7 +776,8 @@ export const EmployeeMonthlyReport: React.FC = () => {
     try {
       if (planDirtyRef.current) await savePlan();
       const res = await api.post(`/monthly-reports/${reportRef.current._id}/submit`);
-      const updated = applyFetchedTasks(res.data, fetchedTasksRef.current);
+      // ─── FIX: apply user toggles after submit response ───────────────────
+      const updated = applyUserToggles(applyFetchedTasks(res.data, fetchedTasksRef.current));
       setReport(updated);
       reportRef.current = updated;
       lastKnownStatus.current = updated.status;
@@ -744,12 +788,13 @@ export const EmployeeMonthlyReport: React.FC = () => {
     } finally {
       setSubmitting(false);
     }
-  }, [savePlan, applyFetchedTasks, showToast, month, year, user?._id]);
+  }, [savePlan, applyFetchedTasks, applyUserToggles, showToast, month, year, user?._id]);
 
   const createReport = useCallback(async () => {
     try {
       const res = await api.post('/monthly-reports', { month, year });
-      const created = applyFetchedTasks(res.data, fetchedTasksRef.current);
+      // ─── FIX: apply user toggles on create (edge case) ───────────────────
+      const created = applyUserToggles(applyFetchedTasks(res.data, fetchedTasksRef.current));
       setReport(created);
       reportRef.current = created;
       lastKnownStatus.current = created.status;
@@ -766,7 +811,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
       }
       showToast('❌ ' + (e?.response?.data?.msg || 'Failed to create report'));
     }
-  }, [month, year, applyFetchedTasks, syncPlanFromReport, showToast, fetchAll, user?._id]);
+  }, [month, year, applyFetchedTasks, applyUserToggles, syncPlanFromReport, showToast, fetchAll, user?._id]);
 
   // ─────────────────────────────────────────────────────────────────────────
   return (

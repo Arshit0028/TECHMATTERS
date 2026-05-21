@@ -121,9 +121,7 @@ const initials = (n?: string | null): string => {
   return n.split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'NA';
 };
 
-// ─── FIX: timezone-safe date formatter ────────────────────────────────────────
-// ISO strings like "2024-01-15T00:00:00.000Z" shift back 1 day in UTC+5:30
-// when parsed with `new Date()`. We extract the date part and treat it as local.
+// ─── Timezone-safe date formatter (UI) ────────────────────────────────────────
 const fmt = (d?: string | null): string => {
   if (!d) return '—';
   const datePart = typeof d === 'string' && d.includes('T') ? d.split('T')[0] : d;
@@ -142,253 +140,441 @@ const taskIsDone = (t: TaskEntry): boolean => t.isDone;
 const empName  = (r: MonthlyReport): string => r.employee?.name?.trim()  || 'Unknown Employee';
 const empEmail = (r: MonthlyReport): string => r.employee?.email?.trim() || '—';
 
-// ─── PDF: Individual Employee ─────────────────────────────────────────────────
+// ─── PDF: Individual Employee (Premium Landscape Layout) ─────────────────────
+//
+//  KEY FIXES vs original:
+//  1. Landscape A4 (297×210mm) — Notes column grows from ~8mm to ~80mm,
+//     eliminating the vertically-stacked character bug.
+//  2. "Rs." currency prefix — jsPDF Helvetica has no ₹ glyph; the original
+//     code was printing a replacement character (¹).
+//  3. Dates always rendered — fmtPDF() returns "Not set" for null/undefined,
+//     clearly distinguishing missing data from an intentional dash separator.
+//  4. Premium design — bordered KPI cards, refined section headers with
+//     accent bars, colour-coded priority/status badges.
+// ─────────────────────────────────────────────────────────────────────────────
 const downloadEmployeePDF = async (report: MonthlyReport) => {
   const { default: jsPDF }     = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
 
-  const doc       = new jsPDF('portrait', 'mm', 'a4');
-  const pw        = doc.internal.pageSize.getWidth();
-  const ph        = doc.internal.pageSize.getHeight();
-  const monthName = MONTHS[report.month - 1];
+  // ── Page setup: LANDSCAPE A4 = 297 × 210 mm ───────────────────────────────
+  const doc = new jsPDF('landscape', 'mm', 'a4');
+  const pw  = doc.internal.pageSize.getWidth();   // 297
+  const ph  = doc.internal.pageSize.getHeight();  // 210
+  const ML  = 14;                                 // left margin
+  const MR  = 14;                                 // right margin
+  const CW  = pw - ML - MR;                       // 269 mm usable width
 
-  // ── Palette ────────────────────────────────────────────────────────────────
-  const violet   : [number,number,number] = [109,  40, 217];
-  const violetMid: [number,number,number] = [139,  92, 246];
-  const violetLt : [number,number,number] = [167, 139, 250];
-  const indigo   : [number,number,number] = [ 99, 102, 241];
-  const teal     : [number,number,number] = [ 20, 184, 166];
-  const emerald  : [number,number,number] = [ 16, 185, 129];
-  const amber    : [number,number,number] = [245, 158,  11];
-  const rose     : [number,number,number] = [244,  63,  94];
-  const sky      : [number,number,number] = [ 14, 165, 233];
-  const slate50  : [number,number,number] = [248, 250, 252];
-  const slate100 : [number,number,number] = [241, 245, 249];
-  const slate200 : [number,number,number] = [226, 232, 240];
-  const slate600 : [number,number,number] = [ 71,  85, 105];
-  const slate800 : [number,number,number] = [ 30,  41,  59];
-  const white    : [number,number,number] = [255, 255, 255];
-
-  const rect = (x: number, y: number, w: number, h: number, c: [number,number,number]) => {
-    doc.setFillColor(...c); doc.rect(x, y, w, h, 'F');
-  };
-  const hr = (y: number, x1 = 14, x2 = pw - 14, c: [number,number,number] = slate200) => {
-    doc.setDrawColor(...c); doc.setLineWidth(0.2); doc.line(x1, y, x2, y);
-  };
-
+  const monthName    = MONTHS[report.month - 1];
   const employeeName = empName(report);
 
-  // ── Cover header ───────────────────────────────────────────────────────────
-  rect(0, 0, pw, 52, violet);
-  rect(0, 46, pw, 6, violetMid);
-  doc.setTextColor(...white);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.text('MONTHLY PERFORMANCE REPORT', 14, 12);
-  doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.15);
-  doc.line(14, 14.5, pw - 14, 14.5);
-  doc.setFontSize(22);
-  doc.text(employeeName.toUpperCase(), 14, 30);
-  doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
-  doc.setTextColor(200, 180, 255);
-  doc.text(empEmail(report), 14, 38);
-  doc.text(`${monthName.toUpperCase()} ${report.year}`, 14, 44);
-
-  const badgeColors: Record<string, [number,number,number]> = {
-    approved: emerald, submitted: [96,165,250], manager_reviewed: amber,
-    rejected: [248,113,113], draft: [100,116,139],
+  // ── Palette ────────────────────────────────────────────────────────────────
+  const C = {
+    violet   : [79,  48, 191] as [number,number,number],
+    violetMid: [109, 77, 226] as [number,number,number],
+    violetLt : [167,139, 250] as [number,number,number],
+    indigo   : [ 79, 70, 229] as [number,number,number],
+    teal     : [ 13,148, 136] as [number,number,number],
+    emerald  : [  5,150, 105] as [number,number,number],
+    amber    : [180,120,  12] as [number,number,number],
+    amberLt  : [245,158,  11] as [number,number,number],
+    rose     : [190, 18,  60] as [number,number,number],
+    sky      : [  3,105, 161] as [number,number,number],
+    orange   : [194, 65,  12] as [number,number,number],
+    slate50  : [248,250, 252] as [number,number,number],
+    slate100 : [241,245, 249] as [number,number,number],
+    slate200 : [226,232, 240] as [number,number,number],
+    slate400 : [148,163, 184] as [number,number,number],
+    slate600 : [ 71, 85, 105] as [number,number,number],
+    slate700 : [ 51, 65,  85] as [number,number,number],
+    slate800 : [ 30, 41,  59] as [number,number,number],
+    slate900 : [ 15, 23,  42] as [number,number,number],
+    white    : [255,255, 255] as [number,number,number],
   };
-  const bColor = badgeColors[report.status] || violetLt;
-  rect(pw - 48, 8, 34, 10, bColor);
-  doc.setTextColor(...white); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
-  doc.text((STATUS_META[report.status]?.label || report.status).toUpperCase(), pw - 31, 14.5, { align: 'center' });
 
-  if (report.status === 'approved' && typeof report.adminScore === 'number') {
-    rect(pw - 48, 21, 34, 10, [30, 41, 59]);
-    doc.setTextColor(...violetLt);
-    doc.setFontSize(7); doc.setFont('helvetica', 'bold');
-    doc.text(`SCORE: ${report.adminScore}/100`, pw - 31, 27.5, { align: 'center' });
-  }
+  // ── Low-level helpers ──────────────────────────────────────────────────────
+  const fill = (x: number, y: number, w: number, h: number, c: [number,number,number]) => {
+    doc.setFillColor(...c); doc.rect(x, y, w, h, 'F');
+  };
+  const strokeRect = (x: number, y: number, w: number, h: number, c: [number,number,number], lw = 0.25) => {
+    doc.setDrawColor(...c); doc.setLineWidth(lw); doc.rect(x, y, w, h, 'S');
+  };
+  const hRule = (y: number, x1 = ML, x2 = pw - MR, c: [number,number,number] = C.slate200, lw = 0.18) => {
+    doc.setDrawColor(...c); doc.setLineWidth(lw); doc.line(x1, y, x2, y);
+  };
 
-  const tasksDone  = (report.tasks || []).filter(t => taskIsDone(t)).length;
-  const tasksTotal = (report.tasks || []).length;
+  // ── Timezone-safe date formatter for PDF ───────────────────────────────────
+  //    Returns "Not set" so reviewers can distinguish missing vs intentional "—"
+  const fmtPDF = (d?: string | null, fallback = 'Not set'): string => {
+    if (!d) return fallback;
+    const part  = d.includes('T') ? d.split('T')[0] : d;
+    const parts = part.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) return fallback;
+    const [yr, mo, dy] = parts;
+    return new Date(yr, mo - 1, dy).toLocaleDateString('en-IN', {
+      day: '2-digit', month: 'short', year: 'numeric',
+    });
+  };
+
+  // Currency: jsPDF Helvetica has no ₹ glyph — use "Rs." which is always safe.
+  const money = (n: number) => `Rs. ${n.toLocaleString('en-IN')}`;
+
+  // ── Computed stats ─────────────────────────────────────────────────────────
+  const tasks      = report.tasks || [];
+  const tasksDone  = tasks.filter(t => taskIsDone(t)).length;
+  const tasksTotal = tasks.length;
   const taskPct    = tasksTotal ? Math.round(tasksDone / tasksTotal * 100) : 0;
   const acts       = report.activities || [];
   const actDone    = acts.filter(a => a.status === 'Completed').length;
-  const reimbTotal = (report.reimbursements || []).reduce((s, r) => s + (r?.amount || 0), 0);
   const nmActs     = report.nextMonthActivities || [];
-  const nmTotal    = (report.nextMonthPlan || []).length + nmActs.length;
+  const nmPlan     = report.nextMonthPlan || [];
+  const reimbs     = report.reimbursements || [];
+  const reimbTotal = reimbs.reduce((s, r) => s + (r?.amount || 0), 0);
+  const nmMonth    = report.month === 12 ? 1 : report.month + 1;
+  const nmYear     = report.month === 12 ? report.year + 1 : report.year;
+  const nmLabel    = `${MONTHS[nmMonth - 1]} ${nmYear}`;
 
-  const kpis = [
-    { label: 'TASKS DONE',  value: `${tasksDone}/${tasksTotal}`,            sub: `${taskPct}% complete`        },
-    { label: 'ACTIVITIES',  value: `${actDone}/${acts.length}`,              sub: 'completed'                   },
-    { label: 'NEXT MONTH',  value: `${nmTotal}`,                             sub: 'tasks & activities'          },
-    { label: 'EXPENSES',    value: `₹${reimbTotal.toLocaleString('en-IN')}`, sub: `${(report.reimbursements || []).length} claim(s)` },
-  ];
-  const kpiW = pw / kpis.length;
-  rect(0, 52, pw, 28, slate100);
-  kpis.forEach((k, i) => {
-    const cx = kpiW * i;
-    if (i > 0) { doc.setDrawColor(...slate200); doc.setLineWidth(0.2); doc.line(cx, 54, cx, 78); }
-    doc.setTextColor(...violet);
-    doc.setFontSize(13); doc.setFont('helvetica', 'bold');
-    doc.text(k.value, cx + kpiW / 2, 65, { align: 'center' });
-    doc.setFontSize(6); doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...slate600);
-    doc.text(k.label, cx + kpiW / 2, 57.5, { align: 'center' });
-    doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...slate600);
-    doc.text(k.sub, cx + kpiW / 2, 73, { align: 'center' });
-  });
-
-  let y = 92;
-
-  const sectionHeading = (label: string, color: [number,number,number] = violet) => {
-    if (y > ph - 50) { doc.addPage(); y = 20; }
-    rect(14, y, pw - 28, 8, color);
-    doc.setTextColor(...white);
-    doc.setFontSize(8); doc.setFont('helvetica', 'bold');
-    doc.text(`  ${label}`, 16, y + 5.5);
-    y += 12;
+  // ── Shared table styles ────────────────────────────────────────────────────
+  const thBase = {
+    textColor  : C.white as [number,number,number],
+    fontStyle  : 'bold' as const,
+    fontSize   : 7.5,
+    cellPadding: { top: 3.5, right: 4, bottom: 3.5, left: 4 },
+  };
+  const tdBase = {
+    fontSize   : 8,
+    cellPadding: { top: 3.5, right: 4, bottom: 3.5, left: 4 },
+    textColor  : C.slate800 as [number,number,number],
+    lineColor  : C.slate200 as [number,number,number],
+    lineWidth  : 0.18,
+    overflow   : 'linebreak' as const,
   };
 
-  const thStyle   = { fillColor: violet as [number,number,number], textColor: white as [number,number,number], fontStyle: 'bold' as const, fontSize: 8, cellPadding: 3 };
-  const bodyStyle = { fontSize: 8, cellPadding: 3, textColor: slate800 as [number,number,number], lineColor: slate200 as [number,number,number], lineWidth: 0.15 };
+  // ── Section heading helper ─────────────────────────────────────────────────
+  let y = 18;
 
-  // ── Section A — Tasks ──────────────────────────────────────────────────────
-  sectionHeading(`A.  ${monthName} ${report.year} — Task Report (${tasksDone}/${tasksTotal} completed)`, violet);
+  const sectionHead = (label: string, accent: [number,number,number], subLabel = '') => {
+    if (y > ph - 55) { doc.addPage(); y = 18; }
+    fill(ML, y, CW, 9, accent);
+    fill(ML, y, 4, 9, C.slate900);            // dark inner left accent bar
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...C.white);
+    doc.setCharSpace(0.4);
+    doc.text(label, ML + 10, y + 6.3);
+    doc.setCharSpace(0);
+    if (subLabel) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(220, 210, 255);
+      doc.text(subLabel, pw - MR - 2, y + 6.3, { align: 'right' });
+    }
+    y += 13;
+  };
 
-  const taskRows = (report.tasks || []).map((task, i) => [
+  // ──────────────────────────────────────────────────────────────────────────
+  //  PAGE 1 — PREMIUM COVER HEADER
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Deep navy top band
+  fill(0, 0, pw, 68, C.slate900);
+  // Violet accent left bar
+  fill(0, 0, 5, 68, C.violetMid);
+  // Subtle diagonal highlight (top-right corner)
+  doc.setFillColor(255, 255, 255);
+  doc.setGState(new (doc as any).GState({ opacity: 0.03 }));
+  doc.triangle(pw - 90, 0, pw, 0, pw, 90, 'F');
+  doc.setGState(new (doc as any).GState({ opacity: 1 }));
+
+  // Report type label
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(...C.violetLt);
+  doc.setCharSpace(2.5);
+  doc.text('MONTHLY PERFORMANCE REPORT', ML + 6, 14);
+  doc.setCharSpace(0);
+  hRule(17, ML + 6, pw * 0.55, C.violetMid, 0.3);
+
+  // Employee name
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(26);
+  doc.setTextColor(...C.white);
+  doc.text(employeeName.toUpperCase(), ML + 6, 34);
+
+  // Email
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...C.slate400);
+  doc.text(empEmail(report), ML + 6, 42);
+
+  // Period + manager
+  const periodLine =
+    `${monthName.toUpperCase()} ${report.year}` +
+    (report.reportingManager?.name ? `   |   Manager: ${report.reportingManager.name}` : '');
+  doc.setFontSize(8);
+  doc.setTextColor(...C.slate400);
+  doc.text(periodLine, ML + 6, 50);
+
+  // Submission date (if present)
+  if (report.submittedAt) {
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Submitted: ${fmtPDF(report.submittedAt)}`, ML + 6, 58);
+  }
+
+  // ── Status badge (top-right) ───────────────────────────────────────────────
+  const sm = STATUS_META[report.status] ?? STATUS_META.draft;
+  const badgeW = 48;
+  const badgeX = pw - MR - badgeW;
+  const statusBgColors: Record<string, [number,number,number]> = {
+    approved        : C.emerald,
+    submitted       : [37, 99, 235],
+    manager_reviewed: [161, 98,  7],
+    rejected        : [185, 28, 28],
+    draft           : C.slate600,
+  };
+  const bC = statusBgColors[report.status] ?? C.slate600;
+  fill(badgeX, 9, badgeW, 11, bC);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(...C.white);
+  doc.setCharSpace(1);
+  doc.text(sm.label.toUpperCase(), badgeX + badgeW / 2, 16, { align: 'center' });
+  doc.setCharSpace(0);
+
+  // Score badge
+  if (report.status === 'approved' && typeof report.adminScore === 'number') {
+    fill(badgeX, 22, badgeW, 11, C.slate700);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.violetLt);
+    doc.text(`SCORE  ${report.adminScore} / 100`, badgeX + badgeW / 2, 29, { align: 'center' });
+  }
+
+  // ── KPI cards row ──────────────────────────────────────────────────────────
+  const kpis = [
+    { label: 'TASKS COMPLETED',  value: `${tasksDone} / ${tasksTotal}`,       sub: `${taskPct}% completion rate`,        accent: C.emerald   },
+    { label: 'ACTIVITIES',       value: `${actDone} / ${acts.length}`,         sub: 'completed this month',               accent: C.indigo    },
+    { label: 'NEXT MONTH PLAN',  value: `${nmPlan.length + nmActs.length}`,    sub: `items planned for ${nmLabel}`,       accent: C.violetMid },
+    { label: 'REIMBURSEMENTS',   value: money(reimbTotal),                     sub: `${reimbs.length} claim(s) submitted`, accent: C.orange    },
+  ];
+  const cardW  = (CW - 9) / kpis.length;          // 3mm gap × 3 spaces
+  const cardY  = 74;
+  const cardH  = 38;
+
+  kpis.forEach((k, i) => {
+    const cx = ML + i * (cardW + 3);
+    fill(cx, cardY, cardW, cardH, C.slate100);     // card background
+    fill(cx, cardY, 3.5, cardH, k.accent);         // accent left strip
+    strokeRect(cx, cardY, cardW, cardH, C.slate200);
+
+    // Label (all-caps monospace)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(...C.slate600);
+    doc.setCharSpace(1.2);
+    doc.text(k.label, cx + 9, cardY + 9);
+    doc.setCharSpace(0);
+
+    // Main value
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.setTextColor(...k.accent);
+    doc.text(k.value, cx + 9, cardY + 23);
+
+    // Sub-label
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.slate600);
+    const subLines = doc.splitTextToSize(k.sub, cardW - 14);
+    doc.text(subLines, cx + 9, cardY + 31);
+  });
+
+  y = cardY + cardH + 12;
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  PAGE 2+ — SECTION A: TASKS
+  // ──────────────────────────────────────────────────────────────────────────
+  doc.addPage();
+  y = 18;
+
+  sectionHead(
+    `A.   ${monthName} ${report.year}  —  Task Report`,
+    C.violet,
+    `${tasksDone} of ${tasksTotal} completed  (${taskPct}%)`,
+  );
+
+  // Column widths must sum to CW = 269 mm
+  //  # 7 | Title 66 | Project 28 | AssignedBy 26 | Start 24 | End 24 | Status 22 | Result 20 | Notes auto
+  const tCols = { 0: 7, 1: 66, 2: 28, 3: 26, 4: 24, 5: 24, 6: 22, 7: 20 };
+  const tNotesW = CW - Object.values(tCols).reduce((a, b) => a + b, 0); // ≈ 52mm
+
+  const taskRows = tasks.map((task, i) => [
     String(i + 1),
     task.title || '—',
     safeName(task.project),
     safeName(task.assignedBy),
-    task.startDate ? fmt(task.startDate) : '—',
-    task.endDate   ? fmt(task.endDate)   : task.dueDate ? fmt(task.dueDate) : '—',
-    task.status    || '—',
+    fmtPDF(task.startDate),
+    fmtPDF(task.endDate || task.dueDate),
+    task.status || '—',
     taskIsDone(task) ? 'Done' : 'Pending',
     taskIsDone(task) ? (task.doneNote || '—') : (task.undoneNote || '—'),
   ]);
 
   autoTable(doc, {
-    startY: y,
-    head: [['#', 'Task', 'Project', 'Assigned By', 'Start', 'End / Due', 'Live Status', 'Result', 'Notes']],
-    body: taskRows.length ? taskRows : [['—', 'No tasks recorded', '—', '—', '—', '—', '—', '—', '—']],
-    theme: 'grid',
-    styles: { ...bodyStyle, overflow: 'linebreak', cellPadding: { top: 3, right: 3, bottom: 3, left: 3 } },
-    headStyles: { ...thStyle, halign: 'center' },
-    alternateRowStyles: { fillColor: slate50 },
-    tableWidth: 'auto',
+    startY    : y,
+    margin    : { left: ML, right: MR },
+    head      : [['#', 'Task Title', 'Project', 'Assigned By', 'Start Date', 'End / Due', 'Live Status', 'Result', 'Notes']],
+    body      : taskRows.length
+      ? taskRows
+      : [['—', 'No tasks recorded for this period', '—', '—', '—', '—', '—', '—', '—']],
+    theme     : 'grid',
+    styles    : { ...tdBase },
+    headStyles: { ...thBase, fillColor: C.violet, halign: 'center' as const },
+    alternateRowStyles: { fillColor: C.slate50 },
     columnStyles: {
-      0: { cellWidth: 6,  halign: 'center' },
-      1: { cellWidth: 46, halign: 'left'   },
-      2: { cellWidth: 22, halign: 'left'   },
-      3: { cellWidth: 22, halign: 'left'   },
-      4: { cellWidth: 21, halign: 'center', fontStyle: 'normal' },
-      5: { cellWidth: 21, halign: 'center', fontStyle: 'normal' },
-      6: { cellWidth: 20, halign: 'center' },
-      7: { cellWidth: 16, halign: 'center' },
-      8: { halign: 'left' },
-    },
-    didParseCell: (data) => {
-      if (data.section === 'body' && (data.column.index === 4 || data.column.index === 5)) {
-        const val = String(data.cell.raw ?? '');
-        if (!val || val === 'undefined' || val === 'null' || val === '—') {
-          data.cell.text = ['—'];
-        }
-      }
+      0: { cellWidth: tCols[0], halign: 'center' as const },
+      1: { cellWidth: tCols[1] },
+      2: { cellWidth: tCols[2] },
+      3: { cellWidth: tCols[3] },
+      4: { cellWidth: tCols[4], halign: 'center' as const, fontSize: 7.5 },
+      5: { cellWidth: tCols[5], halign: 'center' as const, fontSize: 7.5 },
+      6: { cellWidth: tCols[6], halign: 'center' as const },
+      7: { cellWidth: tCols[7], halign: 'center' as const },
+      8: { cellWidth: tNotesW },
     },
     didDrawCell: (data) => {
-      if (data.section === 'body' && data.column.index === 6) {
+      if (data.section !== 'body') return;
+
+      // Result badge (col 7) — filled pill
+      if (data.column.index === 7) {
+        const val = String(data.cell.raw ?? '');
+        const bg: [number,number,number] = val === 'Done' ? C.emerald : C.amberLt;
+        doc.setFillColor(...bg);
+        doc.roundedRect(data.cell.x + 2, data.cell.y + 1.5, data.cell.width - 4, data.cell.height - 3, 1.5, 1.5, 'F');
+        doc.setTextColor(...C.white);
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1.2, { align: 'center' });
+      }
+
+      // Live Status (col 6) — colour-coded text
+      if (data.column.index === 6) {
         const val = String(data.cell.raw ?? '');
         const c: [number,number,number] =
-          val === 'Done'        ? emerald :
-          val === 'In Progress' ? [96, 165, 250] :
-          val === 'Review'      ? amber : slate600;
-        doc.setTextColor(...c); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
-        doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
-      }
-      if (data.section === 'body' && data.column.index === 7) {
-        const val = String(data.cell.raw ?? '');
-        const c   = val === 'Done' ? emerald : amber;
-        doc.setFillColor(...c);
-        doc.roundedRect(data.cell.x + 2, data.cell.y + 1.5, data.cell.width - 4, data.cell.height - 3, 1.5, 1.5, 'F');
-        doc.setTextColor(...white); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
-        doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
+          val === 'Done'        ? C.emerald :
+          val === 'In Progress' ? [37, 99, 235] :
+          val === 'Review'      ? C.amberLt : C.slate600;
+        doc.setTextColor(...c);
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'bold');
+        doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1.2, { align: 'center' });
       }
     },
   });
   y = (doc as any).lastAutoTable.finalY + 14;
 
-  // ── Section B — Activities ─────────────────────────────────────────────────
-  sectionHeading(`B.  Activities This Month (${actDone}/${acts.length} completed)`, indigo);
+  // ──────────────────────────────────────────────────────────────────────────
+  //  SECTION B: ACTIVITIES
+  // ──────────────────────────────────────────────────────────────────────────
+  sectionHead(
+    'B.   Activities This Month',
+    C.indigo,
+    `${actDone} of ${acts.length} completed`,
+  );
+
+  // # 7 | Name 72 | Type 40 | Priority 22 | Start 26 | End 26 | Status 26 | Project auto
+  const aCols = { 0: 7, 1: 72, 2: 40, 3: 22, 4: 26, 5: 26, 6: 26 };
+  const aProjW = CW - Object.values(aCols).reduce((a, b) => a + b, 0);
 
   const actRows = acts.map((a, i) => [
     String(i + 1),
-    a.name         || '—',
-    a.activityType || '—',
-    a.priority     || '—',
-    a.startDate    ? fmt(a.startDate) : '—',
-    a.endDate      ? fmt(a.endDate)   : '—',
-    a.status       || '—',
+    a.name              || '—',
+    a.activityType      || '—',
+    a.priority          || '—',
+    fmtPDF(a.startDate),
+    fmtPDF(a.endDate),
+    a.status            || '—',
+    a.project?.name     || '—',
   ]);
 
   autoTable(doc, {
-    startY: y,
-    head: [['#', 'Activity', 'Type', 'Priority', 'Start', 'End', 'Status']],
-    body: actRows.length ? actRows : [['—', 'No activities recorded', '—', '—', '—', '—', '—']],
-    theme: 'grid',
-    styles: { ...bodyStyle, overflow: 'linebreak' },
-    headStyles: { ...thStyle, fillColor: indigo, halign: 'center' },
-    alternateRowStyles: { fillColor: slate50 },
+    startY    : y,
+    margin    : { left: ML, right: MR },
+    head      : [['#', 'Activity Name', 'Type', 'Priority', 'Start Date', 'End Date', 'Status', 'Project']],
+    body      : actRows.length
+      ? actRows
+      : [['—', 'No activities recorded', '—', '—', '—', '—', '—', '—']],
+    theme     : 'grid',
+    styles    : { ...tdBase },
+    headStyles: { ...thBase, fillColor: C.indigo, halign: 'center' as const },
+    alternateRowStyles: { fillColor: C.slate50 },
     columnStyles: {
-      0: { cellWidth: 6,  halign: 'center' },
-      1: { cellWidth: 56, halign: 'left'   },
-      2: { cellWidth: 30, halign: 'left'   },
-      3: { cellWidth: 18, halign: 'center' },
-      4: { cellWidth: 24, halign: 'center', fontStyle: 'normal' },
-      5: { cellWidth: 24, halign: 'center', fontStyle: 'normal' },
-      6: { halign: 'center' },
-    },
-    didParseCell: (data) => {
-      if (data.section === 'body' && (data.column.index === 4 || data.column.index === 5)) {
-        const val = String(data.cell.raw ?? '');
-        if (!val || val === 'undefined' || val === 'null') data.cell.text = ['—'];
-      }
+      0: { cellWidth: aCols[0], halign: 'center' as const },
+      1: { cellWidth: aCols[1] },
+      2: { cellWidth: aCols[2] },
+      3: { cellWidth: aCols[3], halign: 'center' as const },
+      4: { cellWidth: aCols[4], halign: 'center' as const, fontSize: 7.5 },
+      5: { cellWidth: aCols[5], halign: 'center' as const, fontSize: 7.5 },
+      6: { cellWidth: aCols[6], halign: 'center' as const },
+      7: { cellWidth: aProjW },
     },
     didDrawCell: (data) => {
-      if (data.section === 'body' && data.column.index === 6) {
+      if (data.section !== 'body') return;
+
+      // Status badge (col 6)
+      if (data.column.index === 6) {
         const val = String(data.cell.raw ?? '');
-        const c: [number,number,number] = val === 'Completed' ? emerald : val === 'In Progress' ? [96,165,250] : amber;
-        doc.setFillColor(...c);
+        const bg: [number,number,number] =
+          val === 'Completed'   ? C.emerald :
+          val === 'In Progress' ? [37, 99, 235] : C.amberLt;
+        doc.setFillColor(...bg);
         doc.roundedRect(data.cell.x + 2, data.cell.y + 1.5, data.cell.width - 4, data.cell.height - 3, 1.5, 1.5, 'F');
-        doc.setTextColor(...white); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
-        doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
+        doc.setTextColor(...C.white);
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1.2, { align: 'center' });
       }
-      if (data.section === 'body' && data.column.index === 3) {
+
+      // Priority colour (col 3)
+      if (data.column.index === 3) {
         const val = String(data.cell.raw ?? '');
-        const c: [number,number,number] = val === 'High' ? [248,113,113] : val === 'Medium' ? amber : [96,165,250];
-        doc.setTextColor(...c); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
-        doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
+        const c: [number,number,number] =
+          val === 'High'   ? [185, 28, 28] :
+          val === 'Medium' ? C.amberLt     : [37, 99, 235];
+        doc.setTextColor(...c);
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'bold');
+        doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1.2, { align: 'center' });
       }
     },
   });
   y = (doc as any).lastAutoTable.finalY + 14;
 
-  // ── Section C — Next Month Plan ────────────────────────────────────────────
-  const nmMonth = report.month === 12 ? 1  : report.month + 1;
-  const nmYear  = report.month === 12 ? report.year + 1 : report.year;
-  const nmLabel = `${MONTHS[nmMonth - 1]} ${nmYear}`;
-  const nmPlan  = report.nextMonthPlan || [];
+  // ──────────────────────────────────────────────────────────────────────────
+  //  SECTION C: NEXT MONTH PLAN
+  // ──────────────────────────────────────────────────────────────────────────
+  if (y > ph - 55) { doc.addPage(); y = 18; }
 
-  sectionHeading(`C.  Next Month Plan — ${nmLabel} (${nmPlan.length} tasks · ${nmActs.length} activities)`, violetMid);
+  sectionHead(
+    `C.   Next Month Plan  —  ${nmLabel}`,
+    C.violetMid,
+    `${nmPlan.length} task(s)  ·  ${nmActs.length} activity(ies)`,
+  );
 
+  // C1 — Task plan
   if (nmPlan.length > 0) {
-    if (y > ph - 30) { doc.addPage(); y = 20; }
-    doc.setTextColor(...violetMid);
-    doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
-    doc.text('  TASKS', 16, y);
+    if (y > ph - 50) { doc.addPage(); y = 18; }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.violetMid);
+    doc.setCharSpace(1);
+    doc.text('TASK PLAN', ML + 4, y);
+    doc.setCharSpace(0);
     y += 5;
+
+    // # 7 | Title 66 | Project 30 | Assignee 28 | Priority 20 | Start 26 | End 26 | Notes auto
+    const pCols = { 0: 7, 1: 66, 2: 30, 3: 28, 4: 20, 5: 26, 6: 26 };
+    const pNotesW = CW - Object.values(pCols).reduce((a, b) => a + b, 0);
 
     const planRows = nmPlan.map((item, i) => [
       String(i + 1),
@@ -396,53 +582,56 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
       item.projectName  || '—',
       item.assigneeName || '—',
       item.priority     || '—',
-      item.startDate    ? fmt(item.startDate) : '—',
-      item.endDate      ? fmt(item.endDate)   : '—',
+      fmtPDF(item.startDate),
+      fmtPDF(item.endDate),
       item.notes        || '—',
     ]);
 
     autoTable(doc, {
-      startY: y,
-      head: [['#', 'Task / Goal', 'Project', 'Assignee', 'Priority', 'Start', 'End', 'Notes']],
-      body: planRows,
-      theme: 'grid',
-      styles: { ...bodyStyle, overflow: 'linebreak' },
-      headStyles: { ...thStyle, fillColor: violetMid, halign: 'center' },
-      alternateRowStyles: { fillColor: slate50 },
+      startY    : y,
+      margin    : { left: ML, right: MR },
+      head      : [['#', 'Task / Goal', 'Project', 'Assignee', 'Priority', 'Start Date', 'End Date', 'Notes']],
+      body      : planRows,
+      theme     : 'grid',
+      styles    : { ...tdBase },
+      headStyles: { ...thBase, fillColor: C.violetMid, halign: 'center' as const },
+      alternateRowStyles: { fillColor: C.slate50 },
       columnStyles: {
-        0: { cellWidth: 6,  halign: 'center' },
-        1: { cellWidth: 46, halign: 'left'   },
-        2: { cellWidth: 24, halign: 'left'   },
-        3: { cellWidth: 24, halign: 'left'   },
-        4: { cellWidth: 16, halign: 'center' },
-        5: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
-        6: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
-        7: { halign: 'left' },
-      },
-      didParseCell: (data) => {
-        if (data.section === 'body' && (data.column.index === 5 || data.column.index === 6)) {
-          const val = String(data.cell.raw ?? '');
-          if (!val || val === 'undefined' || val === 'null') data.cell.text = ['—'];
-        }
+        0: { cellWidth: pCols[0], halign: 'center' as const },
+        1: { cellWidth: pCols[1] },
+        2: { cellWidth: pCols[2] },
+        3: { cellWidth: pCols[3] },
+        4: { cellWidth: pCols[4], halign: 'center' as const },
+        5: { cellWidth: pCols[5], halign: 'center' as const, fontSize: 7.5 },
+        6: { cellWidth: pCols[6], halign: 'center' as const, fontSize: 7.5 },
+        7: { cellWidth: pNotesW },
       },
       didDrawCell: (data) => {
         if (data.section === 'body' && data.column.index === 4) {
           const val = String(data.cell.raw ?? '');
-          const c: [number,number,number] = val === 'High' ? [248,113,113] : val === 'Medium' ? amber : [96,165,250];
+          const c: [number,number,number] =
+            val === 'High' ? [185, 28, 28] : val === 'Medium' ? C.amberLt : [37, 99, 235];
           doc.setTextColor(...c); doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
-          doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
+          doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1.2, { align: 'center' });
         }
       },
     });
     y = (doc as any).lastAutoTable.finalY + 10;
   }
 
+  // C2 — Activity plan
   if (nmActs.length > 0) {
-    if (y > ph - 30) { doc.addPage(); y = 20; }
-    doc.setTextColor(...sky);
-    doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
-    doc.text('  ACTIVITIES', 16, y);
+    if (y > ph - 50) { doc.addPage(); y = 18; }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.sky);
+    doc.setCharSpace(1);
+    doc.text('ACTIVITY PLAN', ML + 4, y);
+    doc.setCharSpace(0);
     y += 5;
+
+    const naCols = { 0: 7, 1: 66, 2: 30, 3: 28, 4: 20, 5: 26, 6: 26 };
+    const naNotesW = CW - Object.values(naCols).reduce((a, b) => a + b, 0);
 
     const nmActRows = nmActs.map((a, i) => [
       String(i + 1),
@@ -450,41 +639,37 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
       a.projectName  || '—',
       a.activityType || '—',
       a.priority     || '—',
-      a.startDate    ? fmt(a.startDate) : '—',
-      a.endDate      ? fmt(a.endDate)   : '—',
+      fmtPDF(a.startDate),
+      fmtPDF(a.endDate),
       a.notes        || '—',
     ]);
 
     autoTable(doc, {
-      startY: y,
-      head: [['#', 'Activity', 'Project', 'Type', 'Priority', 'Start', 'End', 'Notes']],
-      body: nmActRows,
-      theme: 'grid',
-      styles: { ...bodyStyle, overflow: 'linebreak' },
-      headStyles: { ...thStyle, fillColor: sky, halign: 'center' },
-      alternateRowStyles: { fillColor: slate50 },
+      startY    : y,
+      margin    : { left: ML, right: MR },
+      head      : [['#', 'Activity', 'Project', 'Type', 'Priority', 'Start Date', 'End Date', 'Notes']],
+      body      : nmActRows,
+      theme     : 'grid',
+      styles    : { ...tdBase },
+      headStyles: { ...thBase, fillColor: C.sky, halign: 'center' as const },
+      alternateRowStyles: { fillColor: C.slate50 },
       columnStyles: {
-        0: { cellWidth: 6,  halign: 'center' },
-        1: { cellWidth: 46, halign: 'left'   },
-        2: { cellWidth: 24, halign: 'left'   },
-        3: { cellWidth: 24, halign: 'left'   },
-        4: { cellWidth: 16, halign: 'center' },
-        5: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
-        6: { cellWidth: 22, halign: 'center', fontStyle: 'normal' },
-        7: { halign: 'left' },
-      },
-      didParseCell: (data) => {
-        if (data.section === 'body' && (data.column.index === 5 || data.column.index === 6)) {
-          const val = String(data.cell.raw ?? '');
-          if (!val || val === 'undefined' || val === 'null') data.cell.text = ['—'];
-        }
+        0: { cellWidth: naCols[0], halign: 'center' as const },
+        1: { cellWidth: naCols[1] },
+        2: { cellWidth: naCols[2] },
+        3: { cellWidth: naCols[3] },
+        4: { cellWidth: naCols[4], halign: 'center' as const },
+        5: { cellWidth: naCols[5], halign: 'center' as const, fontSize: 7.5 },
+        6: { cellWidth: naCols[6], halign: 'center' as const, fontSize: 7.5 },
+        7: { cellWidth: naNotesW },
       },
       didDrawCell: (data) => {
         if (data.section === 'body' && data.column.index === 4) {
           const val = String(data.cell.raw ?? '');
-          const c: [number,number,number] = val === 'High' ? [248,113,113] : val === 'Medium' ? amber : [96,165,250];
+          const c: [number,number,number] =
+            val === 'High' ? [185, 28, 28] : val === 'Medium' ? C.amberLt : [37, 99, 235];
           doc.setTextColor(...c); doc.setFontSize(7.5); doc.setFont('helvetica', 'bold');
-          doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
+          doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1.2, { align: 'center' });
         }
       },
     });
@@ -492,112 +677,158 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   }
 
   if (nmPlan.length === 0 && nmActs.length === 0) {
-    doc.setTextColor(...slate600); doc.setFontSize(9); doc.setFont('helvetica', 'italic');
-    doc.text('No next-month plan submitted.', 16, y);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9);
+    doc.setTextColor(...C.slate400);
+    doc.text('No next-month plan submitted.', ML + 4, y);
     y += 10;
-  } else {
-    y += 4;
   }
 
-  // ── Section D — Reimbursements ─────────────────────────────────────────────
-  if ((report.reimbursements || []).length > 0) {
-    sectionHeading(`D.  Reimbursements (Total: ₹${reimbTotal.toLocaleString('en-IN')})`, teal);
-    const reimbRows = (report.reimbursements || []).map((r, i) => [
+  // ──────────────────────────────────────────────────────────────────────────
+  //  SECTION D: REIMBURSEMENTS
+  // ──────────────────────────────────────────────────────────────────────────
+  if (reimbs.length > 0) {
+    if (y > ph - 55) { doc.addPage(); y = 18; }
+    sectionHead(
+      'D.   Reimbursements',
+      C.teal,
+      `Total: ${money(reimbTotal)}   |   ${reimbs.length} claim(s)`,
+    );
+
+    // # 8 | Title 150 | Date 36 | Amount 40 | Status auto
+    const rCols = { 0: 8, 1: 150, 2: 36, 3: 40 };
+    const rStatusW = CW - Object.values(rCols).reduce((a, b) => a + b, 0);
+
+    const reimbRows = reimbs.map((r, i) => [
       String(i + 1),
       r.title || '—',
-      r.expenseDate ? fmt(r.expenseDate) : '—',
-      `Rs ${(r.amount || 0).toLocaleString('en-IN')}`,
+      fmtPDF(r.expenseDate),
+      money(r.amount || 0),
       r.status || '—',
     ]);
+
     autoTable(doc, {
-      startY: y,
-      head: [['#', 'Title', 'Date', 'Amount', 'Status']],
-      body: reimbRows,
-      theme: 'grid',
-      styles: bodyStyle,
-      headStyles: { ...thStyle, fillColor: teal, halign: 'center' },
-      alternateRowStyles: { fillColor: slate50 },
+      startY    : y,
+      margin    : { left: ML, right: MR },
+      head      : [['#', 'Description', 'Date', 'Amount', 'Status']],
+      body      : reimbRows,
+      theme     : 'grid',
+      styles    : { ...tdBase },
+      headStyles: { ...thBase, fillColor: C.teal, halign: 'center' as const },
+      alternateRowStyles: { fillColor: C.slate50 },
       columnStyles: {
-        0: { cellWidth: 7,  halign: 'center' },
-        2: { cellWidth: 26, halign: 'center', fontStyle: 'normal' },
-        3: { cellWidth: 32, halign: 'right',  fontStyle: 'bold'   },
-        4: { cellWidth: 24, halign: 'center' },
-      },
-      didParseCell: (data) => {
-        if (data.section === 'body' && data.column.index === 2) {
-          const val = String(data.cell.raw ?? '');
-          if (!val || val === 'undefined' || val === 'null') data.cell.text = ['—'];
-        }
+        0: { cellWidth: rCols[0], halign: 'center' as const },
+        1: { cellWidth: rCols[1] },
+        2: { cellWidth: rCols[2], halign: 'center' as const, fontSize: 7.5 },
+        3: { cellWidth: rCols[3], halign: 'right' as const, fontStyle: 'bold' },
+        4: { cellWidth: rStatusW, halign: 'center' as const },
       },
       didDrawCell: (data) => {
         if (data.section === 'body' && data.column.index === 4) {
           const val = String(data.cell.raw ?? '');
-          const c   = val === 'Approved' ? emerald : val === 'Rejected' ? rose : val === 'Paid' ? [96,165,250] as [number,number,number] : amber;
-          doc.setFillColor(...c);
+          const bg: [number,number,number] =
+            val === 'Approved' ? C.emerald :
+            val === 'Paid'     ? [37, 99, 235] :
+            val === 'Rejected' ? C.rose : C.amberLt;
+          doc.setFillColor(...bg);
           doc.roundedRect(data.cell.x + 2, data.cell.y + 1.5, data.cell.width - 4, data.cell.height - 3, 1.5, 1.5, 'F');
-          doc.setTextColor(...white); doc.setFontSize(7); doc.setFont('helvetica', 'bold');
-          doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1, { align: 'center' });
+          doc.setTextColor(...C.white);
+          doc.setFontSize(7);
+          doc.setFont('helvetica', 'bold');
+          doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1.2, { align: 'center' });
         }
       },
     });
     y = (doc as any).lastAutoTable.finalY + 14;
   }
 
-  // ── Overall Summary ────────────────────────────────────────────────────────
-  if (y > ph - 55) { doc.addPage(); y = 20; }
-  rect(14, y, pw - 28, 7, teal);
-  doc.setTextColor(...white); doc.setFontSize(8); doc.setFont('helvetica', 'bold');
-  doc.text('  OVERALL SUMMARY', 16, y + 5);
-  y += 11;
+  // ──────────────────────────────────────────────────────────────────────────
+  //  SECTION E: REMARKS & NOTES
+  // ──────────────────────────────────────────────────────────────────────────
+  const hasFeedback =
+    report.managerRemarks    ||
+    report.adminRemarks      ||
+    report.nextMonthFreeText ||
+    report.lastMonthNote?.accomplishments;
 
-  const summaryParts: string[] = [];
-  if (report.managerRemarks)    summaryParts.push(`Manager Remarks: ${report.managerRemarks}`);
-  if (report.adminRemarks)      summaryParts.push(`Admin Remarks: ${report.adminRemarks}`);
-  if (report.nextMonthFreeText) summaryParts.push(`Next Month Notes: ${report.nextMonthFreeText}`);
-  const summary = summaryParts.join('\n\n') || 'No summary provided.';
+  if (hasFeedback) {
+    if (y > ph - 60) { doc.addPage(); y = 18; }
+    sectionHead('E.   Remarks & Notes', C.amber);
 
-  doc.setTextColor(...slate800); doc.setFontSize(9.5); doc.setFont('helvetica', 'normal');
-  const summaryLines = doc.splitTextToSize(summary, pw - 34);
-  rect(14, y, pw - 28, Math.min(summaryLines.length * 5 + 8, 60), slate50);
-  doc.text(summaryLines, 18, y + 5);
-  y += summaryLines.length * 5 + 16;
+    const remarkRows: string[][] = [];
+    if (report.managerRemarks)             remarkRows.push(['Manager Remarks',   report.managerRemarks]);
+    if (report.adminRemarks)               remarkRows.push(['Admin Remarks',     report.adminRemarks]);
+    if (report.nextMonthFreeText)          remarkRows.push(['Next Month Notes',  report.nextMonthFreeText]);
+    if (report.lastMonthNote?.accomplishments) remarkRows.push(['Accomplishments', report.lastMonthNote.accomplishments]);
+    if (report.lastMonthNote?.challenges)      remarkRows.push(['Challenges',      report.lastMonthNote.challenges]);
+    if (report.lastMonthNote?.learnings)       remarkRows.push(['Learnings',       report.lastMonthNote.learnings]);
 
-  if (report.lastMonthNote?.accomplishments) {
-    if (y > ph - 60) { doc.addPage(); y = 20; }
-    rect(14, y, pw - 28, 7, amber);
-    doc.setTextColor(...white); doc.setFontSize(8); doc.setFont('helvetica', 'bold');
-    doc.text('  LAST MONTH NOTES', 16, y + 5);
-    y += 11;
-    const lmRows: string[][] = [];
-    if (report.lastMonthNote.accomplishments) lmRows.push(['Accomplishments', report.lastMonthNote.accomplishments]);
-    if (report.lastMonthNote.challenges)      lmRows.push(['Challenges',      report.lastMonthNote.challenges]);
-    if (report.lastMonthNote.learnings)       lmRows.push(['Learnings',       report.lastMonthNote.learnings]);
-    autoTable(doc, {
-      startY: y, body: lmRows, theme: 'plain',
-      styles: { fontSize: 9, cellPadding: 4, textColor: slate800 },
-      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 38, textColor: slate600 } },
-    });
-    y = (doc as any).lastAutoTable.finalY + 14;
+    if (remarkRows.length) {
+      autoTable(doc, {
+        startY : y,
+        margin : { left: ML, right: MR },
+        body   : remarkRows,
+        theme  : 'plain',
+        styles : { ...tdBase, lineColor: C.slate200, lineWidth: 0.18 },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 44, textColor: C.slate600 as [number,number,number], fillColor: C.slate100 as [number,number,number] },
+          1: { cellWidth: CW - 44 },
+        },
+      });
+      y = (doc as any).lastAutoTable.finalY + 14;
+    }
   }
 
-  // ── Footer on every page ───────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────────
+  //  REJECTION NOTE (if applicable)
+  // ──────────────────────────────────────────────────────────────────────────
+  if (report.status === 'rejected' && report.rejectionNote) {
+    if (y > ph - 40) { doc.addPage(); y = 18; }
+    fill(ML, y, CW, 8, [185, 28, 28]);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.white);
+    doc.text('  REJECTION / RETURN NOTE', ML + 4, y + 5.6);
+    y += 10;
+    fill(ML, y, CW, 16, [255, 245, 245]);
+    strokeRect(ML, y, CW, 16, [254, 202, 202]);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(127, 29, 29);
+    const rLines = doc.splitTextToSize(report.rejectionNote, CW - 10);
+    doc.text(rLines, ML + 5, y + 5);
+    y += Math.max(16, rLines.length * 5 + 6) + 10;
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  SIGNATURE BLOCK (last page, only if space remains)
+  // ──────────────────────────────────────────────────────────────────────────
+  const sigY = ph - 28;
+  doc.setPage((doc as any).internal.getNumberOfPages());
+  if (y < sigY - 10) {
+    hRule(sigY, ML, ML + 72, C.slate600, 0.3);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.slate600);
+    doc.text('Employee Signature & Date', ML, sigY + 5);
+
+    hRule(sigY, pw / 2, pw / 2 + 72, C.slate600, 0.3);
+    doc.text('Reporting Manager Signature', pw / 2, sigY + 5);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  FOOTER — stamped on every page
+  // ──────────────────────────────────────────────────────────────────────────
   const totalPages = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
-    rect(0, ph - 14, pw, 14, slate800);
-    doc.setTextColor(...white); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-    doc.text(`${employeeName}  ·  ${monthName} ${report.year}  ·  CONFIDENTIAL`, 14, ph - 6);
-    doc.text(`Page ${p} of ${totalPages}`, pw - 14, ph - 6, { align: 'right' });
-    doc.text(`Generated ${new Date().toLocaleDateString('en-IN')}`, pw / 2, ph - 6, { align: 'center' });
-  }
-
-  doc.setPage(totalPages);
-  if (y < ph - 35) {
-    hr(y + 2, 14, pw / 2 - 10);
-    doc.setTextColor(...slate600); doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-    doc.text('Employee Signature & Date', 14, y + 8);
-    hr(y + 2, pw / 2 + 10, pw - 14);
-    doc.text('Reporting Manager Signature', pw / 2 + 10, y + 8);
+    fill(0, ph - 10, pw, 10, C.slate900);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`${employeeName}   |   ${monthName} ${report.year}   |   CONFIDENTIAL`, ML, ph - 3.5);
+    doc.text(`Page ${p} of ${totalPages}`, pw / 2, ph - 3.5, { align: 'center' });
+    doc.text(`Generated ${new Date().toLocaleDateString('en-IN')}`, pw - MR, ph - 3.5, { align: 'right' });
   }
 
   doc.save(`${employeeName.replace(/\s+/g, '_')}_${monthName}_${report.year}_Report.pdf`);
@@ -627,7 +858,7 @@ const downloadPDF = async (reports: MonthlyReport[], month: number, year: number
         empName(r), empEmail(r),
         `${done}/${total} (${pct}%)`,
         `${aDone}/${aTotal}`,
-        `Rs ${reimb.toLocaleString('en-IN')}`,
+        `Rs. ${reimb.toLocaleString('en-IN')}`,
         String(nmTotal),
         STATUS_META[r.status]?.label ?? r.status,
         r.status === 'approved' && typeof r.adminScore === 'number' ? `${r.adminScore}/100` : '—',
