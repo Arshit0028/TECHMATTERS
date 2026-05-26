@@ -14,7 +14,7 @@ const { can, ADMIN_ROLES } = require("../middleware/permissions");
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const isAdminOrManager = (user) =>
   ADMIN_ROLES.includes(user.accessLevel) ||
-  ["manager", "project-manager"].includes(user.accessLevel);
+  ["manager", "project-manager", "hr"].includes(user.accessLevel);
 
 const populate = (query) =>
   query
@@ -218,7 +218,10 @@ router.get("/team", auth, async (req, res) => {
 
     let query = {};
 
-    if (!ADMIN_ROLES.includes(req.user.accessLevel)) {
+    const seesAll =
+      ADMIN_ROLES.includes(req.user.accessLevel) ||
+      req.user.accessLevel === "hr";
+    if (!seesAll) {
       query.reportingManager = req.user.id;
     }
 

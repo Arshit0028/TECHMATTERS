@@ -69,6 +69,12 @@ export const Navbar = () => {
     user.accessLevel === 'admin' ||
     user.accessLevel === 'super-admin';
 
+  const isHR = user.accessLevel === 'hr';
+
+  // HR and admins share the same expanded menu (Team + Performance);
+  // everyone else gets the personal "My Performance" link.
+  const hasAdminMenu = isAdmin || isHR;
+
   const navLinks = [
     {
       to: '/',
@@ -106,7 +112,7 @@ export const Navbar = () => {
       label: 'Claims',
     },
 
-    ...(isAdmin
+    ...(hasAdminMenu
       ? [
           {
             to: '/users',

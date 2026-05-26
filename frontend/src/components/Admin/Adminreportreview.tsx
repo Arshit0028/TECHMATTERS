@@ -1411,7 +1411,7 @@ export const AdminReportReview: React.FC = () => {
   const [search,       setSearch]       = useState('');
   const [pdfLoading,   setPdfLoading]   = useState(false);
 
-  const isAdmin   = ['super-admin', 'admin'].includes(user?.accessLevel || '');
+  const isAdmin   = ['super-admin', 'admin', "hr"].includes(user?.accessLevel || '');
   const isManager = ['manager', 'project-manager'].includes(user?.accessLevel || '');
   const YEARS     = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 

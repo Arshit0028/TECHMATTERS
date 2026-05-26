@@ -22,6 +22,7 @@ import ProtectedRoute from './components/Layout/ProtectedRoute';
 import { PerformanceDashboard } from './components/Admin/PerformanceDashboard';
 import { EmployeeMonthlyReport } from './components/Dashboard/Employeemonthlyreport';
 import { AdminReportReview } from './components/Admin/Adminreportreview';
+import { HRDashboard } from './components/Hr/HRDashboard';
 
 // ─── Full-screen auth loader ──────────────────────────────────────────────────
 const AuthLoader: React.FC = () => (
@@ -54,6 +55,16 @@ const AuthLoader: React.FC = () => (
   </div>
 );
 
+// ─── Role-based landing redirect ────────────────────────────────────────────
+const HomeRedirect: React.FC = () => {
+  const { user } = useAuth();
+  const level = user?.accessLevel;
+
+  if (level === 'hr') return <Navigate to="/hr" replace />;
+  if (level === 'admin' || level === 'super-admin') return <Navigate to="/admin" replace />;
+  return <EmployeeDashboard />;
+};
+
 // ─── All app routes ───────────────────────────────────────────────────────────
 const AppRoutes: React.FC = () => {
   const { user, authReady } = useAuth();
@@ -75,9 +86,10 @@ const AppRoutes: React.FC = () => {
           />
 
           {/* Protected */}
-          <Route path="/"                   element={<ProtectedRoute><EmployeeDashboard /></ProtectedRoute>} />
+          <Route path="/"                   element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
           <Route path="/monthly-report"     element={<ProtectedRoute><MonthlyReport /></ProtectedRoute>} />
-          <Route path="/admin"              element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin"              element={<ProtectedRoute><EmployeeDashboard /></ProtectedRoute>} />
+          <Route path="/hr"                 element={<ProtectedRoute><HRDashboard /></ProtectedRoute>} />
           <Route path="/users"              element={<ProtectedRoute><UserList /></ProtectedRoute>} />
           <Route path="/users/new"          element={<ProtectedRoute><UserForm /></ProtectedRoute>} />
           <Route path="/users/:id"          element={<ProtectedRoute><UserForm /></ProtectedRoute>} />
