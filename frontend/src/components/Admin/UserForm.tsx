@@ -23,11 +23,23 @@ const ACCESS_CONFIG: Record<string, { color: string; bg: string; desc: string }>
   senior:           { color: '#34d399', bg: 'rgba(52,211,153,0.12)',  desc: 'Senior contributor' },
   'project-manager':{ color: '#818cf8', bg: 'rgba(129,140,248,0.12)', desc: 'Project management' },
   manager:          { color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', desc: 'Team management' },
+  // ── New HR role ──────────────────────────────────────────────────────────
+  hr:               { color: '#fb923c', bg: 'rgba(251,146,60,0.12)',  desc: 'HR & reimbursements' },
+  // ────────────────────────────────────────────────────────────────────────
   admin:            { color: '#fbbf24', bg: 'rgba(251,191,36,0.12)',  desc: 'Full system access' },
   'super-admin':    { color: '#f87171', bg: 'rgba(248,113,113,0.12)', desc: 'Unrestricted access' },
 };
 
-type AccessLevel = 'entry' | 'tech' | 'senior' | 'project-manager' | 'manager' | 'admin' | 'super-admin';
+// ── Add 'hr' to the AccessLevel union ────────────────────────────────────────
+type AccessLevel =
+  | 'entry'
+  | 'tech'
+  | 'senior'
+  | 'project-manager'
+  | 'manager'
+  | 'hr'
+  | 'admin'
+  | 'super-admin';
 
 export const UserForm: React.FC = () => {
   const { id } = useParams();
@@ -62,7 +74,7 @@ export const UserForm: React.FC = () => {
     try {
       const res = await getUsers(1, 100, undefined, undefined);
       const allUsers: User[] = res.data.users ?? res.data ?? [];
-      setManagers(allUsers.filter(u => ['manager', 'admin', 'super-admin'].includes(u.accessLevel)));
+      setManagers(allUsers.filter(u => ['manager', 'admin', 'super-admin', 'hr'].includes(u.accessLevel)));
     } catch (err) { console.error('Failed to load managers:', err); }
   };
 
@@ -90,7 +102,6 @@ export const UserForm: React.FC = () => {
     } catch (err) { console.error(err); }
   };
 
-  // ── Client-side validation ────────────────────────────────────────────────
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     const name = formData.name.trim();
@@ -203,7 +214,6 @@ export const UserForm: React.FC = () => {
         }
         .uf-subtitle { font-size: 13px; color: rgba(255,255,255,0.35); font-weight: 300; margin-bottom: 2.5rem; }
 
-        /* Card */
         .uf-card {
           background: rgba(255,255,255,0.04);
           border: 1px solid rgba(255,255,255,0.08);
@@ -212,7 +222,6 @@ export const UserForm: React.FC = () => {
           overflow: hidden;
         }
 
-        /* Section */
         .uf-section {
           padding: 2rem;
           border-bottom: 1px solid rgba(255,255,255,0.05);
@@ -231,13 +240,11 @@ export const UserForm: React.FC = () => {
           background: rgba(255,255,255,0.06);
         }
 
-        /* Grid */
         .uf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
         .uf-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
         .uf-stack { display: flex; flex-direction: column; gap: 1.25rem; }
         .col-span-2 { grid-column: span 2; }
 
-        /* Field */
         .uf-field { display: flex; flex-direction: column; gap: 7px; }
         .uf-label {
           font-size: 12px; font-weight: 500;
@@ -248,7 +255,6 @@ export const UserForm: React.FC = () => {
         .uf-label-icon { color: rgba(167,139,250,0.65); display: flex; }
         .uf-required { color: #f87171; font-size: 10px; margin-left: 2px; }
 
-        /* Input */
         .uf-input, .uf-textarea, .uf-select {
           background: rgba(255,255,255,0.05);
           border: 1px solid rgba(255,255,255,0.1);
@@ -280,7 +286,6 @@ export const UserForm: React.FC = () => {
         .uf-select option { background: #1a1a2e; color: #fff; }
         input[type="date"].uf-input::-webkit-calendar-picker-indicator { filter: invert(0.4); cursor: pointer; }
 
-        /* Password wrapper */
         .pw-wrap { position: relative; }
         .pw-wrap .uf-input { padding-right: 44px; }
         .pw-toggle {
@@ -291,7 +296,6 @@ export const UserForm: React.FC = () => {
         }
         .pw-toggle:hover { color: rgba(255,255,255,0.6); }
 
-        /* Field error */
         .field-error {
           display: flex; align-items: center; gap: 5px;
           font-size: 11px; color: #f87171;
@@ -299,7 +303,6 @@ export const UserForm: React.FC = () => {
         }
         @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
 
-        /* File upload */
         .file-upload {
           display: flex; align-items: center; gap: 10px;
           padding: 11px 15px;
@@ -313,7 +316,7 @@ export const UserForm: React.FC = () => {
         .file-upload-text { font-size: 13px; color: rgba(255,255,255,0.4); }
         .file-upload-name { font-size: 13px; color: rgba(167,139,250,0.9); }
 
-        /* Access level pills */
+        /* ── Access level pills — now 4-col to fit 8 roles ── */
         .access-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
         .access-pill {
           padding: 10px 8px; border-radius: 12px; text-align: center;
@@ -326,7 +329,9 @@ export const UserForm: React.FC = () => {
         .access-pill-name { font-size: 12px; font-weight: 500; margin-bottom: 3px; }
         .access-pill-desc { font-size: 10px; color: rgba(255,255,255,0.3); line-height: 1.3; }
 
-        /* Status toggle */
+        /* ── HR pill highlight ── */
+        .access-pill[data-level="hr"].active .access-pill-name { color: #fb923c; }
+
         .status-row { display: flex; gap: 10px; }
         .status-chip {
           flex: 1; padding: 10px; border-radius: 12px; text-align: center;
@@ -341,7 +346,6 @@ export const UserForm: React.FC = () => {
           background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.4); color: #f87171;
         }
 
-        /* Permissions */
         .perm-card {
           background: rgba(255,255,255,0.03);
           border: 1px solid rgba(255,255,255,0.07);
@@ -373,7 +377,6 @@ export const UserForm: React.FC = () => {
         .perm-label { font-size: 12px; color: rgba(255,255,255,0.55); text-transform: capitalize; }
         .perm-label.checked { color: rgba(255,255,255,0.85); }
 
-        /* Submit error / success */
         .submit-error {
           display: flex; align-items: flex-start; gap: 10px;
           padding: 14px 16px; border-radius: 12px;
@@ -389,7 +392,6 @@ export const UserForm: React.FC = () => {
           margin: 0 2rem 1rem;
         }
 
-        /* Actions */
         .uf-actions {
           display: flex; gap: 12px;
           padding: 1.75rem 2rem;
@@ -423,6 +425,17 @@ export const UserForm: React.FC = () => {
           animation: spin 0.7s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── HR badge on access pills ── */
+        .hr-badge {
+          display: inline-block;
+          font-size: 9px;
+          padding: 1px 5px;
+          border-radius: 4px;
+          background: rgba(251,146,60,0.2);
+          color: #fb923c;
+          margin-top: 3px;
+        }
 
         @media (max-width: 640px) {
           .uf-grid, .uf-grid-3 { grid-template-columns: 1fr; }
@@ -522,12 +535,12 @@ export const UserForm: React.FC = () => {
 
                   <div className="uf-field">
                     <label className="uf-label"><span className="uf-label-icon"><Building2 size={12} /></span>Department</label>
-                    <input className="uf-input" placeholder="e.g. Engineering" value={formData.department} onChange={e => set('department', e.target.value)} />
+                    <input className="uf-input" placeholder="e.g. Human Resources" value={formData.department} onChange={e => set('department', e.target.value)} />
                   </div>
 
                   <div className="uf-field">
                     <label className="uf-label"><span className="uf-label-icon"><Award size={12} /></span>Designation</label>
-                    <input className="uf-input" placeholder="e.g. Senior Developer" value={formData.designation} onChange={e => set('designation', e.target.value)} />
+                    <input className="uf-input" placeholder="e.g. HR Manager" value={formData.designation} onChange={e => set('designation', e.target.value)} />
                   </div>
 
                   <div className="uf-field">
@@ -603,16 +616,26 @@ export const UserForm: React.FC = () => {
                         <button
                           key={level}
                           type="button"
+                          data-level={level}
                           className={`access-pill ${formData.accessLevel === level ? 'active' : ''}`}
                           style={formData.accessLevel === level
                             ? { background: cfg.bg, borderColor: cfg.color + '60', color: cfg.color }
                             : {}}
                           onClick={() => set('accessLevel', level as AccessLevel)}
                         >
-                          <div className="access-pill-name" style={formData.accessLevel === level ? { color: cfg.color } : { color: 'rgba(255,255,255,0.6)' }}>
-                            {level === 'super-admin' ? 'Super' : level === 'project-manager' ? 'PM' : level.charAt(0).toUpperCase() + level.slice(1)}
+                          <div
+                            className="access-pill-name"
+                            style={formData.accessLevel === level ? { color: cfg.color } : { color: 'rgba(255,255,255,0.6)' }}
+                          >
+                            {level === 'super-admin' ? 'Super'
+                              : level === 'project-manager' ? 'PM'
+                              : level.charAt(0).toUpperCase() + level.slice(1)}
                           </div>
                           <div className="access-pill-desc">{cfg.desc}</div>
+                          {/* Extra badge for HR to surface key capabilities at a glance */}
+                          {level === 'hr' && (
+                            <div className="hr-badge">approve/reject</div>
+                          )}
                         </button>
                       ))}
                     </div>

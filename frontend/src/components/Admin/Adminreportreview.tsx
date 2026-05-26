@@ -408,17 +408,28 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   const tCols = { 0: 7, 1: 66, 2: 28, 3: 26, 4: 24, 5: 24, 6: 22, 7: 20 };
   const tNotesW = CW - Object.values(tCols).reduce((a, b) => a + b, 0); // ≈ 52mm
 
-  const taskRows = tasks.map((task, i) => [
-    String(i + 1),
-    task.title || '—',
-    safeName(task.project),
-    safeName(task.assignedBy),
-    fmtPDF(task.startDate),
-    fmtPDF(task.endDate || task.dueDate),
-    task.status || '—',
-    taskIsDone(task) ? 'Done' : 'Pending',
-    taskIsDone(task) ? (task.doneNote || '—') : (task.undoneNote || '—'),
-  ]);
+// Resolve a date from the report task first, then fall back to the linked
+// Task document (taskRef) which is where the real start/end dates live.
+const ref = (task: TaskEntry): any =>
+  task.taskRef && typeof task.taskRef === 'object' ? task.taskRef : null;
+
+const startOf = (task: TaskEntry): string | null | undefined =>
+  task.startDate ?? ref(task)?.startDate ?? null;
+
+const endOf = (task: TaskEntry): string | null | undefined =>
+  task.endDate ?? ref(task)?.endDate ?? task.dueDate ?? ref(task)?.dueDate ?? null;
+
+const taskRows = tasks.map((task, i) => [
+  String(i + 1),
+  task.title || '—',
+  safeName(task.project),
+  safeName(task.assignedBy),
+  fmtPDF(startOf(task)),
+  fmtPDF(endOf(task)),
+  task.status || '—',
+  taskIsDone(task) ? 'Done' : 'Pending',
+  taskIsDone(task) ? (task.doneNote || '—') : (task.undoneNote || '—'),
+]);
 
   autoTable(doc, {
     startY    : y,

@@ -7,9 +7,17 @@ import { useAuth } from '../../context/AuthContext';
 import type { User } from '../types/index';
 
 const ROLE_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
-  admin:   { color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', label: 'Admin'   },
-  manager: { color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  label: 'Manager' },
-  member:  { color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', label: 'Member'  },
+  'super-admin': { color: '#f87171', bg: 'rgba(248,113,113,0.12)', label: 'Super Admin' },
+  admin:         { color: '#fbbf24', bg: 'rgba(251,191,36,0.12)',  label: 'Admin'       },
+  manager:       { color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', label: 'Manager'     },
+  'project-manager': { color: '#818cf8', bg: 'rgba(129,140,248,0.12)', label: 'PM'      },
+  senior:        { color: '#34d399', bg: 'rgba(52,211,153,0.12)',  label: 'Senior'      },
+  tech:          { color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  label: 'Tech'        },
+  // ── New HR role ──────────────────────────────────────────────────────────
+  hr:            { color: '#fb923c', bg: 'rgba(251,146,60,0.12)',  label: 'HR'          },
+  // ────────────────────────────────────────────────────────────────────────
+  member:        { color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', label: 'Member'      },
+  entry:         { color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', label: 'Entry'       },
 };
 
 const getInitials = (name: string) =>
@@ -38,8 +46,6 @@ export const UserList: React.FC = () => {
   const { user: currentUser } = useAuth();
 
   useEffect(() => { loadUsers(); }, [page]);
-
-  // Reset to page 1 on search change
   useEffect(() => { setPage(1); loadUsers(); }, [search]);
 
   const loadUsers = async () => {
@@ -48,7 +54,6 @@ export const UserList: React.FC = () => {
       const res = await getUsers(page, 10, undefined, undefined);
       const data = res.data;
       const allUsers: User[] = data.users ?? data ?? [];
-      // Client-side search filter
       const filtered = search.trim()
         ? allUsers.filter(u =>
             u.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -92,7 +97,6 @@ export const UserList: React.FC = () => {
         }
         .ul-container { max-width: 1000px; margin: 0 auto; }
 
-        /* ── Header ── */
         .ul-header {
           display: flex;
           align-items: flex-end;
@@ -131,7 +135,6 @@ export const UserList: React.FC = () => {
           font-weight: 300;
         }
 
-        /* ── Add button ── */
         .btn-add {
           background: linear-gradient(135deg, #7c3aed, #6366f1);
           color: #fff;
@@ -154,7 +157,6 @@ export const UserList: React.FC = () => {
           box-shadow: 0 6px 28px rgba(124,58,237,0.5);
         }
 
-        /* ── Search ── */
         .ul-search-wrap {
           position: relative;
           margin-bottom: 1.5rem;
@@ -188,7 +190,6 @@ export const UserList: React.FC = () => {
           box-shadow: 0 0 0 3px rgba(167,139,250,0.08);
         }
 
-        /* ── Stats row ── */
         .ul-stats {
           display: flex;
           gap: 12px;
@@ -214,7 +215,6 @@ export const UserList: React.FC = () => {
           color: rgba(255,255,255,0.35);
         }
 
-        /* ── Table card ── */
         .ul-card {
           background: rgba(255,255,255,0.03);
           border: 1px solid rgba(255,255,255,0.08);
@@ -222,7 +222,6 @@ export const UserList: React.FC = () => {
           overflow: hidden;
         }
 
-        /* ── Table ── */
         .ul-table { width: 100%; border-collapse: collapse; }
         .ul-thead th {
           padding: 14px 20px;
@@ -245,7 +244,6 @@ export const UserList: React.FC = () => {
         .ul-row:hover { background: rgba(255,255,255,0.03); }
         .ul-td { padding: 14px 20px; vertical-align: middle; }
 
-        /* ── User cell ── */
         .user-cell { display: flex; align-items: center; gap: 12px; }
         .ul-avatar {
           width: 36px; height: 36px;
@@ -274,7 +272,6 @@ export const UserList: React.FC = () => {
           gap: 6px;
         }
 
-        /* ── Badges ── */
         .badge {
           display: inline-flex;
           align-items: center;
@@ -289,7 +286,6 @@ export const UserList: React.FC = () => {
         .badge-active { background: rgba(52,211,153,0.12); color: #34d399; }
         .badge-inactive { background: rgba(248,113,113,0.1); color: #f87171; }
 
-        /* ── Action menu ── */
         .action-cell { position: relative; }
         .menu-btn {
           background: none;
@@ -336,7 +332,6 @@ export const UserList: React.FC = () => {
         .dropdown-item.danger:hover { background: rgba(248,113,113,0.1); color: #f87171; }
         .dropdown-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 5px 0; }
 
-        /* ── Empty / Loading ── */
         .ul-empty {
           padding: 4rem 2rem;
           text-align: center;
@@ -352,10 +347,6 @@ export const UserList: React.FC = () => {
           margin: 0 auto 1rem;
           color: rgba(255,255,255,0.2);
         }
-        .ul-loading {
-          padding: 4rem 2rem;
-          text-align: center;
-        }
         .ul-skeleton {
           height: 56px;
           background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
@@ -365,7 +356,6 @@ export const UserList: React.FC = () => {
         }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-        /* ── Pagination ── */
         .ul-pagination {
           display: flex;
           align-items: center;
@@ -451,8 +441,14 @@ export const UserList: React.FC = () => {
             </div>
             <div className="ul-stat">
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#60a5fa' }} />
-              <span className="ul-stat-num">{users.filter(u => u.accessLevel === 'admin' || u.accessLevel === 'manager').length}</span>
+              <span className="ul-stat-num">{users.filter(u => ['admin','manager','super-admin'].includes(u.accessLevel)).length}</span>
               <span className="ul-stat-label">managers / admins</span>
+            </div>
+            {/* ── New HR stat chip ── */}
+            <div className="ul-stat">
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fb923c' }} />
+              <span className="ul-stat-num">{users.filter(u => (u.accessLevel as string) === 'hr').length}</span>
+              <span className="ul-stat-label">HR</span>
             </div>
           </motion.div>
 
@@ -515,13 +511,9 @@ export const UserList: React.FC = () => {
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: idx * 0.04 }}
                         >
-                          {/* Name + Avatar */}
                           <td className="ul-td">
                             <div className="user-cell">
-                              <div
-                                className="ul-avatar"
-                                style={{ background: avatarGradient(u.name) }}
-                              >
+                              <div className="ul-avatar" style={{ background: avatarGradient(u.name) }}>
                                 {getInitials(u.name)}
                               </div>
                               <div>
@@ -531,7 +523,6 @@ export const UserList: React.FC = () => {
                             </div>
                           </td>
 
-                          {/* Email */}
                           <td className="ul-td col-email">
                             <div className="user-email">
                               <Mail size={12} style={{ opacity: 0.4, flexShrink: 0 }} />
@@ -539,18 +530,13 @@ export const UserList: React.FC = () => {
                             </div>
                           </td>
 
-                          {/* Role */}
                           <td className="ul-td">
-                            <span
-                              className="badge"
-                              style={{ background: roleCfg.bg, color: roleCfg.color }}
-                            >
-                              {(u.accessLevel === 'admin') && <ShieldCheck size={11} />}
+                            <span className="badge" style={{ background: roleCfg.bg, color: roleCfg.color }}>
+                              {u.accessLevel === 'admin' && <ShieldCheck size={11} />}
                               {roleCfg.label}
                             </span>
                           </td>
 
-                          {/* Status */}
                           <td className="ul-td">
                             <span className={`badge ${u.status === 'active' ? 'badge-active' : 'badge-inactive'}`}>
                               <span className="badge-dot" style={{ background: u.status === 'active' ? '#34d399' : '#f87171' }} />
@@ -558,12 +544,8 @@ export const UserList: React.FC = () => {
                             </span>
                           </td>
 
-                          {/* Actions */}
                           <td className="ul-td action-cell" onClick={e => e.stopPropagation()}>
-                            <button
-                              className="menu-btn"
-                              onClick={() => setActiveMenu(isMenuOpen ? null : u._id)}
-                            >
+                            <button className="menu-btn" onClick={() => setActiveMenu(isMenuOpen ? null : u._id)}>
                               <MoreVertical size={16} />
                             </button>
                             {isMenuOpen && (
@@ -592,7 +574,6 @@ export const UserList: React.FC = () => {
               </table>
             )}
 
-            {/* Pagination */}
             {!loading && users.length > 0 && (
               <div className="ul-pagination">
                 <span className="page-info">

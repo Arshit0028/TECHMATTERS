@@ -12,7 +12,7 @@ export interface User {
   resume?: string;
   reportingManager?: User | string;
   status: 'active' | 'inactive';
-  accessLevel: 'entry' | 'tech' | 'senior' | 'manager' | 'project-manager' | 'admin' | 'super-admin';
+  accessLevel: 'entry' | 'tech' | 'senior' | 'manager' | 'project-manager' | 'admin' | 'super-admin' | 'hr';
   permissions: Permission[];
   createdAt: string;
   role?: string;

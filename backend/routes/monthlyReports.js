@@ -22,7 +22,10 @@ const populate = (query) =>
     .populate("reportingManager", "name email")
     .populate("tasks.assignedBy", "name")
     .populate("tasks.project", "name")
-    .populate("tasks.taskRef", "title status priority")
+    .populate(
+      "tasks.taskRef",
+      "title status priority startDate endDate dueDate",
+    )
     .populate("nextMonthPlan.project", "name")
     .populate("nextMonthPlan.assignee", "name")
     .populate("reimbursements", "title amount status receipts expenseDate")
@@ -44,6 +47,88 @@ const sanitizeNextMonthPlan = (items) => {
       endDate: item.endDate || undefined,
     }));
 };
+
+// ── Remove report tasks whose linked Task no longer exists ────────────────────
+// Handles BOTH storage shapes:
+//   • modern: task has taskRef → match taskRef against the Tasks collection
+//   • legacy: task has NO taskRef but the live Task _id was stored as the
+//     subdoc _id (older link code) → match the subdoc _id against Tasks.
+//
+// A task is treated as "came from the Tasks module" (prunable when its Task is
+// gone) if it has a taskRef OR carries Tasks-module metadata (project /
+// assignedBy / dueDate). A genuine self-added task — title only, no taskRef,
+// no project/assignedBy/dueDate — is always kept.
+async function pruneDeletedTasks(reportId) {
+  const report = await MonthlyReport.findById(reportId);
+  if (!report || !report.tasks || report.tasks.length === 0) return false;
+
+  // Candidate Task ids: taskRef when present, otherwise the subdoc _id (legacy).
+  const candidateIds = [];
+  for (const t of report.tasks) {
+    const id = (t.taskRef ? t.taskRef : t._id)?.toString();
+    if (id && mongoose.Types.ObjectId.isValid(id)) candidateIds.push(id);
+  }
+
+  if (candidateIds.length === 0) return false;
+
+  // Which candidate ids still exist as real Tasks?
+  const liveTasks = await Task.find({ _id: { $in: candidateIds } }).select(
+    "_id",
+  );
+  const liveIdSet = new Set(liveTasks.map((t) => t._id.toString()));
+
+  const before = report.tasks.length;
+
+  report.tasks = report.tasks.filter((t) => {
+    const id = (t.taskRef ? t.taskRef : t._id)?.toString();
+
+    // The Task still exists → keep.
+    if (id && liveIdSet.has(id)) return true;
+
+    // No matching live Task. Did this task originate from the Tasks module?
+    const cameFromTasksModule =
+      Boolean(t.taskRef) ||
+      Boolean(t.project) ||
+      Boolean(t.assignedBy) ||
+      Boolean(t.dueDate);
+
+    // From Tasks module + no live Task = deleted → DROP.
+    // Otherwise it's a genuine self-added task → KEEP.
+    return !cameFromTasksModule;
+  });
+
+  if (report.tasks.length !== before) {
+    await report.save();
+    return true;
+  }
+  return false;
+}
+
+// ── Normalize a populated report so the frontend keys tasks by the live
+// Task _id (taskRef._id) instead of the embedded subdoc _id. Self-added tasks
+// (no taskRef) keep their subdoc _id.
+function normalizeReportTasks(reportObj) {
+  if (!reportObj || !Array.isArray(reportObj.tasks)) return reportObj;
+
+  reportObj.tasks = reportObj.tasks.map((t) => {
+    const ref = t.taskRef;
+    if (ref && typeof ref === "object" && ref._id) {
+      return {
+        ...t,
+        _id: ref._id,
+        title: t.title || ref.title,
+        status: ref.status,
+        priority: ref.priority,
+      };
+    }
+    if (ref) {
+      return { ...t, _id: ref };
+    }
+    return t;
+  });
+
+  return reportObj;
+}
 
 // ── Fetch activities for an employee in a given month/year ───────────────────
 async function getActivitiesForReport(employeeId, month, year) {
@@ -75,12 +160,11 @@ async function withActivities(reportDoc) {
     obj.month,
     obj.year,
   );
-  return obj;
+  return normalizeReportTasks(obj);
 }
 
 /* ============================================================
    GET /api/monthly-reports/mine?month=5&year=2025
-   Employee fetches (or auto-creates) their current report
 ============================================================ */
 router.get("/mine", auth, async (req, res) => {
   try {
@@ -109,8 +193,11 @@ router.get("/mine", auth, async (req, res) => {
       await report.save();
     }
 
+    await pruneDeletedTasks(report._id);
+
     const populated = await populate(MonthlyReport.findById(report._id));
-    res.json(populated);
+    const obj = populated.toObject ? populated.toObject() : populated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -119,8 +206,6 @@ router.get("/mine", auth, async (req, res) => {
 
 /* ============================================================
    GET /api/monthly-reports/team?month=5&year=2025
-   Admin/Manager: list all reports — WITH activities attached
-   NOTE: defined BEFORE /:id so it is not swallowed by that route
 ============================================================ */
 router.get("/team", auth, async (req, res) => {
   try {
@@ -133,13 +218,15 @@ router.get("/team", auth, async (req, res) => {
 
     let query = {};
 
-    // Super Admin sees ALL; manager sees only their team
     if (!ADMIN_ROLES.includes(req.user.accessLevel)) {
       query.reportingManager = req.user.id;
     }
 
     if (month) query.month = month;
     if (year) query.year = year;
+
+    const reportDocs = await MonthlyReport.find(query).select("_id");
+    await Promise.all(reportDocs.map((r) => pruneDeletedTasks(r._id)));
 
     const reports = await populate(
       MonthlyReport.find(query).sort({ year: -1, month: -1 }),
@@ -155,8 +242,6 @@ router.get("/team", auth, async (req, res) => {
 
 /* ============================================================
    PATCH /api/monthly-reports/:id/link-tasks
-   Links external Task documents into the report's task list.
-   Safe to call repeatedly — deduplicates by taskRef.
 ============================================================ */
 router.patch("/:id/link-tasks", auth, async (req, res) => {
   try {
@@ -172,12 +257,10 @@ router.patch("/:id/link-tasks", auth, async (req, res) => {
       return res.status(403).json({ msg: "Not your report" });
     }
 
-    // Build set of already-linked external task IDs
     const alreadyLinked = new Set(
       report.tasks.filter((t) => t.taskRef).map((t) => t.taskRef.toString()),
     );
 
-    // Only fetch tasks not yet linked
     const newIds = taskIds.filter((id) => !alreadyLinked.has(id.toString()));
 
     if (newIds.length > 0) {
@@ -202,8 +285,11 @@ router.patch("/:id/link-tasks", auth, async (req, res) => {
       await report.save();
     }
 
+    await pruneDeletedTasks(report._id);
+
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -212,10 +298,11 @@ router.patch("/:id/link-tasks", auth, async (req, res) => {
 
 /* ============================================================
    GET /api/monthly-reports/:id
-   Single report — WITH activities attached
 ============================================================ */
 router.get("/:id", auth, async (req, res) => {
   try {
+    await pruneDeletedTasks(req.params.id);
+
     const report = await populate(MonthlyReport.findById(req.params.id));
     if (!report) return res.status(404).json({ msg: "Report not found" });
 
@@ -234,7 +321,6 @@ router.get("/:id", auth, async (req, res) => {
 
 /* ============================================================
    POST /api/monthly-reports
-   Create a new report
 ============================================================ */
 router.post("/", auth, async (req, res) => {
   try {
@@ -265,7 +351,8 @@ router.post("/", auth, async (req, res) => {
 
     await report.save();
     const populated = await populate(MonthlyReport.findById(report._id));
-    res.status(201).json(populated);
+    const obj = populated.toObject ? populated.toObject() : populated;
+    res.status(201).json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     if (err.code === 11000) {
@@ -277,7 +364,6 @@ router.post("/", auth, async (req, res) => {
 
 /* ============================================================
    POST /api/monthly-reports/:id/self-tasks
-   Employee adds their own task manually
 ============================================================ */
 router.post("/:id/self-tasks", auth, async (req, res) => {
   try {
@@ -303,7 +389,8 @@ router.post("/:id/self-tasks", auth, async (req, res) => {
 
     await report.save();
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -312,8 +399,6 @@ router.post("/:id/self-tasks", auth, async (req, res) => {
 
 /* ============================================================
    PATCH /api/monthly-reports/:id/tasks/:taskId
-   Update task isDone status or notes.
-   taskId may be the external Task._id (taskRef) OR the subdoc _id.
 ============================================================ */
 router.patch("/:id/tasks/:taskId", auth, async (req, res) => {
   try {
@@ -329,20 +414,18 @@ router.patch("/:id/tasks/:taskId", auth, async (req, res) => {
       return res.status(400).json({ msg: "Cannot edit submitted report" });
     }
 
-    // Find by taskRef (external Task ID) first, then fall back to subdoc _id
     let task =
       report.tasks.find(
         (t) => t.taskRef && t.taskRef.toString() === req.params.taskId,
       ) ?? report.tasks.id(req.params.taskId);
 
-    // If still not found, auto-link it on the fly
     if (!task) {
       const ext = await Task.findById(req.params.taskId)
         .populate("assigner", "name")
         .populate("project", "name")
         .lean();
 
-      if (!ext) return res.status(404).json({ msg: "Task not found" });
+      if (!ext) return res.status(404).json({ msg: "Task no longer exists" });
 
       report.tasks.push({
         taskRef: ext._id,
@@ -373,7 +456,8 @@ router.patch("/:id/tasks/:taskId", auth, async (req, res) => {
 
     await report.save();
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -404,7 +488,8 @@ router.patch("/:id/next-month-plan", auth, async (req, res) => {
 
     await report.save();
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -437,7 +522,8 @@ router.patch("/:id/link-reimbursements", auth, async (req, res) => {
     await report.save();
 
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -459,7 +545,10 @@ router.post("/:id/submit", auth, async (req, res) => {
       return res.status(400).json({ msg: "Report already submitted" });
     }
 
-    const incompleteWithoutNote = report.tasks.filter(
+    await pruneDeletedTasks(report._id);
+    const fresh = await MonthlyReport.findById(report._id);
+
+    const incompleteWithoutNote = fresh.tasks.filter(
       (t) => !t.isDone && !t.undoneNote?.trim(),
     );
     if (incompleteWithoutNote.length > 0) {
@@ -468,12 +557,13 @@ router.post("/:id/submit", auth, async (req, res) => {
       });
     }
 
-    report.status = "submitted";
-    report.submittedAt = new Date();
-    await report.save();
+    fresh.status = "submitted";
+    fresh.submittedAt = new Date();
+    await fresh.save();
 
-    const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const updated = await populate(MonthlyReport.findById(fresh._id));
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -482,7 +572,6 @@ router.post("/:id/submit", auth, async (req, res) => {
 
 /* ============================================================
    POST /api/monthly-reports/:id/manager-review
-   Manager: add remarks → manager_reviewed
 ============================================================ */
 router.post("/:id/manager-review", auth, async (req, res) => {
   try {
@@ -505,7 +594,8 @@ router.post("/:id/manager-review", auth, async (req, res) => {
     await report.save();
 
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -514,8 +604,6 @@ router.post("/:id/manager-review", auth, async (req, res) => {
 
 /* ============================================================
    POST /api/monthly-reports/:id/approve
-   Admin: final approval + score
-   Accepts both submitted AND manager_reviewed
 ============================================================ */
 router.post("/:id/approve", auth, async (req, res) => {
   try {
@@ -542,7 +630,8 @@ router.post("/:id/approve", auth, async (req, res) => {
     await report.save();
 
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -577,7 +666,8 @@ router.post("/:id/reject", auth, async (req, res) => {
     await report.save();
 
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -609,7 +699,8 @@ router.post("/:id/reopen", auth, async (req, res) => {
     await report.save();
 
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });
@@ -618,7 +709,6 @@ router.post("/:id/reopen", auth, async (req, res) => {
 
 /* ============================================================
    PATCH /api/monthly-reports/:id/last-month-note
-   Employee saves accomplishments / challenges / learnings
 ============================================================ */
 router.patch("/:id/last-month-note", auth, async (req, res) => {
   try {
@@ -642,7 +732,8 @@ router.patch("/:id/last-month-note", auth, async (req, res) => {
 
     await report.save();
     const updated = await populate(MonthlyReport.findById(report._id));
-    res.json(updated);
+    const obj = updated.toObject ? updated.toObject() : updated;
+    res.json(normalizeReportTasks(obj));
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Server error" });

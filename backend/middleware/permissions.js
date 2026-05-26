@@ -4,12 +4,24 @@ const ADMIN_ROLES = ["super-admin", "admin"];
 
 /**
  * Role definitions based on actual accessLevel values used in the DB.
- * From screenshots: users have accessLevel = 'tech', 'super-admin', 'admin'
- * Full set supported: super-admin, admin, manager, project-manager, senior, tech, entry
+ * Full set supported: super-admin, admin, manager, project-manager, senior, tech, entry, hr
  *
- * Permission actions: read | create | update | delete
+ * Permission actions: read | create | update | delete | approve | reject
  */
 const PERMISSIONS = {
+  // ── HR role ───────────────────────────────────────────────────────────────
+  // Read-only across all modules; approve/reject on reimbursements;
+  // read performance data for all employees.
+  hr: {
+    projects: ["read"],
+    tasks: ["read"],
+    activities: ["read"],
+    reimbursements: ["read", "approve", "reject"],
+    reports: ["read"],
+    users: ["read"],
+    performance: ["read"],
+  },
+
   // ── Manager-level roles ───────────────────────────────────────────────────
   manager: {
     projects: ["read", "create", "update"],
@@ -30,7 +42,6 @@ const PERMISSIONS = {
   },
 
   // ── Tech / Senior roles ───────────────────────────────────────────────────
-  // 'tech' is what your real users have — confirmed from screenshots
   tech: {
     projects: ["read"],
     tasks: ["read", "create", "update", "delete"],
@@ -86,6 +97,11 @@ const hasPermission = (user, module, action) => {
 /**
  * Express middleware factory.
  * Usage: router.get('/path', auth, can('projects', 'read'), handler)
+ *
+ * HR-specific examples:
+ *   router.patch('/reimbursements/:id/approve', auth, can('reimbursements', 'approve'), handler)
+ *   router.patch('/reimbursements/:id/reject',  auth, can('reimbursements', 'reject'),  handler)
+ *   router.get('/performance',                  auth, can('performance', 'read'),       handler)
  */
 const can = (module, action) => (req, res, next) => {
   if (!req.user) return res.status(401).json({ msg: "Unauthorized" });
@@ -93,4 +109,4 @@ const can = (module, action) => (req, res, next) => {
   res.status(403).json({ msg: `Missing ${action} on ${module}` });
 };
 
-module.exports = { hasPermission, can, ADMIN_ROLES };
+module.exports = { hasPermission, can, ADMIN_ROLES, PERMISSIONS };

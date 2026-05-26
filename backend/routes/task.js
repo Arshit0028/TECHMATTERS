@@ -65,13 +65,22 @@ const deleteFileIfExists = async (filePath) => {
 router.get("/", [auth, can("tasks", "read")], async (req, res) => {
   try {
     const isAdmin = ADMIN_ROLES.includes(req.user.accessLevel);
-    const { project, status, search } = req.query;
+    const { project, status, search, assignee } = req.query;
 
     const filter = {};
 
-    // 🔥 FIXED: Non-admins now see tasks they created (assigner) OR tasks assigned to them
+    // Non-admins see tasks they created (assigner) OR tasks assigned to them
     if (!isAdmin) {
       filter.$or = [{ assignee: req.user.id }, { assigner: req.user.id }];
+    }
+
+    // ── Explicit assignee filter (used by the monthly report) ──
+    // When an assignee is requested, scope strictly to that assignee so the
+    // report's task list matches exactly who the tasks belong to.
+    if (assignee) {
+      filter.assignee = assignee;
+      // For a non-admin, drop the broad $or so the assignee filter is exact.
+      if (!isAdmin) delete filter.$or;
     }
 
     if (project) filter.project = project;
@@ -222,11 +231,12 @@ router.put(
   },
 );
 
-/// backend/routes/task.js
-// ... (keep all your existing code for GET, POST, PUT) ...
-
 // ─── DELETE task ───────────────────────────────────────────────────────────────
-router.delete("/:id", [auth, can("tasks", "delete")], async (req, res) => {
+// NOTE: Only `auth` middleware here — the blanket `can("tasks","delete")` gate
+// was removed so the per-task ownership check below can actually run. A user
+// who is the creator OR assignee (or an admin) may delete; everyone else gets
+// a 403 from the in-handler check, so security is unchanged.
+router.delete("/:id", auth, async (req, res) => {
   try {
     const task = await Task.findById(req.params.id);
     if (!task) {
@@ -238,7 +248,7 @@ router.delete("/:id", [auth, can("tasks", "delete")], async (req, res) => {
     const isAssignee =
       task.assignee && task.assignee.toString() === req.user.id;
 
-    // Allow delete if admin OR creator OR assignee (even if global delete permission is missing)
+    // Allow delete if admin OR creator OR assignee
     if (!isAdmin && !isCreator && !isAssignee) {
       return res
         .status(403)

@@ -36,10 +36,23 @@ const UserSchema = new mongoose.Schema({
     default: null,
   },
   password: { type: String, required: true },
-  status: { type: String, enum: ["active", "inactive"], default: "active" },
+  status: {
+    type: String,
+    enum: ["active", "inactive"],
+    default: "active",
+  },
   accessLevel: {
     type: String,
-    enum: ["entry", "tech", "manager", "admin", "super-admin"],
+    enum: [
+      "entry",
+      "tech",
+      "senior", // was missing
+      "project-manager", // was missing
+      "manager",
+      "hr", // new
+      "admin",
+      "super-admin",
+    ],
     default: "entry",
   },
   permissions: [permissionSchema],
