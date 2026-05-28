@@ -240,7 +240,7 @@ export const ReimbursementDetail: React.FC = () => {
                     {(claim as any).receipts.map((r: any, i: number) => (
                       <a
                         key={i}
-                        href={`http://localhost:5000/${r.url}`}
+                        href={`https://techmatters.onrender.com/api/${r.url}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="rd-receipt-btn"
