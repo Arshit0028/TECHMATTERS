@@ -7,6 +7,10 @@ const auth = require("../middleware/auth");
 const { can, ADMIN_ROLES } = require("../middleware/permissions");
 const upload = require("../middleware/upload");
 
+// ── Helper: HR can see and action all reims, but not mark as Paid ─────────────
+const isAdminOrHR = (accessLevel) =>
+  ADMIN_ROLES.includes(accessLevel) || accessLevel === "hr";
+
 // GET all reimbursements (with pagination & filters)
 router.get(
   "/",
@@ -29,7 +33,7 @@ router.get(
       return res.status(400).json({ errors: errors.array() });
 
     try {
-      const isAdmin = ADMIN_ROLES.includes(req.user.accessLevel);
+      const isAdmin = isAdminOrHR(req.user.accessLevel); // ← updated (was ADMIN_ROLES.includes)
       const {
         status,
         project,
@@ -42,7 +46,7 @@ router.get(
 
       const filter = {};
 
-      // Admins can filter by a specific employee; non-admins see only their own
+      // Admins/HR can filter by a specific employee; non-admins see only their own
       if (!isAdmin) {
         filter.employee = req.user.id;
       } else if (employee) {
@@ -106,7 +110,7 @@ router.get(
       if (!reimbursement)
         return res.status(404).json({ msg: "Reimbursement not found" });
 
-      const isAdmin = ADMIN_ROLES.includes(req.user.accessLevel);
+      const isAdmin = isAdminOrHR(req.user.accessLevel); // ← updated (was ADMIN_ROLES.includes)
       if (!isAdmin && reimbursement.employee?._id?.toString() !== req.user.id) {
         return res.status(403).json({ msg: "Access denied" });
       }
@@ -196,6 +200,13 @@ router.put(
       return res.status(400).json({ errors: errors.array() });
 
     try {
+      // ← HR can Approve/Reject but not mark as Paid (finance/admin only)
+      if (req.user.accessLevel === "hr" && req.body.status === "Paid") {
+        return res
+          .status(403)
+          .json({ msg: "HR cannot mark reimbursements as Paid" });
+      }
+
       const reimbursement = await Reimbursement.findById(req.params.id);
       if (!reimbursement) return res.status(404).json({ msg: "Not found" });
 
