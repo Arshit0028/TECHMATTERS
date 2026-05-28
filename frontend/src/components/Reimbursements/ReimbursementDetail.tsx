@@ -240,13 +240,13 @@ export const ReimbursementDetail: React.FC = () => {
                     {(claim as any).receipts.map((r: any, i: number) => (
                       <a
                         key={i}
-                        href={`https://techmatters.onrender.com/api/${r.url}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rd-receipt-btn"
-                      >
-                        <Download size={13} /> {r.name || `Receipt ${i + 1}`}
-                      </a>
+  href={`${process.env.REACT_APP_API_URL}/${r.url}`}
+  target="_blank"
+  rel="noopener noreferrer"
+  className="rd-receipt-btn"
+>
+  <Download size={13} /> {r.name || `Receipt ${i + 1}`}
+</a>
                     ))}
                   </div>
                 </div>
