@@ -1,9 +1,4 @@
 // src/components/Reimbursements/ReimbursementDetail.tsx
-// Updated: dark theme matching EmployeeMonthlyReport + AdminReportReview
-// • SuperAdmin / Admin / Manager → can Approve, Reject, Mark Paid
-// • Employee → read-only (status visible, no action buttons)
-// • "View Monthly Report" link if the claim is attached to one
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -12,10 +7,9 @@ import { useAuth } from '../../context/AuthContext';
 import type { Reimbursement } from '../types/index';
 import {
   ArrowLeft, Download, CheckCircle2, XCircle, Clock,
-  DollarSign, Receipt, Calendar, FileText, AlertCircle, Loader2,
+  DollarSign, FileText, AlertCircle, Loader2,
 } from 'lucide-react';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
 const fmt = (d?: string) =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
@@ -26,7 +20,8 @@ const STATUS_META: Record<string, { color: string; bg: string; border: string; l
   Paid:     { color: '#60a5fa', bg: 'rgba(96,165,250,0.10)',  border: 'rgba(96,165,250,0.25)',  label: 'Paid'     },
 };
 
-// ─── Component ────────────────────────────────────────────────────────────────
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
 export const ReimbursementDetail: React.FC = () => {
   const { id }    = useParams();
   const navigate  = useNavigate();
@@ -72,6 +67,11 @@ export const ReimbursementDetail: React.FC = () => {
     }
   };
 
+  const openReceipt = (url: string) => {
+    const fullUrl = `${API_URL}/${url}`;
+    window.open(fullUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const sm = claim ? (STATUS_META[claim.status] ?? STATUS_META['Pending']) : null;
 
   return (
@@ -87,39 +87,31 @@ export const ReimbursementDetail: React.FC = () => {
 
         .rd-card { background: rgba(255,255,255,0.028); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; overflow: hidden; }
 
-        /* Header band */
         .rd-header { padding: 24px 28px 20px; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-        .rd-title-wrap {}
         .rd-eyebrow { font-size: 9px; font-family: 'DM Mono', monospace; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(167,139,250,0.55); margin-bottom: 6px; }
         .rd-title { font-family: 'Syne', sans-serif; font-size: 1.55rem; font-weight: 700; color: #fff; letter-spacing: -0.02em; line-height: 1.2; }
         .rd-date  { font-size: 11px; color: rgba(255,255,255,0.28); font-family: 'DM Mono', monospace; margin-top: 6px; }
 
-        /* Stats strip */
         .rd-pills { display: flex; gap: 10px; flex-wrap: wrap; padding: 16px 28px; border-bottom: 1px solid rgba(255,255,255,0.06); }
         .rd-pill  { display: flex; flex-direction: column; align-items: center; padding: 10px 14px; border-radius: 12px; min-width: 64px; }
         .rd-pill-val { font-family: 'Syne', sans-serif; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; }
         .rd-pill-lbl { font-size: 9.5px; font-family: 'DM Mono', monospace; letter-spacing: 0.09em; text-transform: uppercase; color: rgba(255,255,255,0.28); margin-top: 3px; }
 
-        /* Body */
         .rd-body { padding: 24px 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
         @media (max-width: 540px) { .rd-body { grid-template-columns: 1fr; } }
         .rd-field-lbl { font-size: 9.5px; font-family: 'DM Mono', monospace; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.3); margin-bottom: 5px; }
         .rd-field-val { font-size: 13.5px; color: rgba(255,255,255,0.78); }
 
-        /* Description */
         .rd-desc-wrap { padding: 0 28px 20px; }
         .rd-desc { background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.07); border-radius: 13px; padding: 14px 16px; font-size: 13.5px; color: rgba(255,255,255,0.65); line-height: 1.65; }
 
-        /* Receipts */
         .rd-receipts { padding: 0 28px 20px; }
-        .rd-receipt-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 15px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; color: rgba(255,255,255,0.6); font-size: 12px; text-decoration: none; transition: all 0.18s; margin: 4px; }
+        .rd-receipt-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 15px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; color: rgba(255,255,255,0.6); font-size: 12px; cursor: pointer; transition: all 0.18s; margin: 4px; text-decoration: none; }
         .rd-receipt-btn:hover { background: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.15); }
 
-        /* Monthly report link */
         .rd-report-link { display: flex; align-items: center; gap: 8px; margin: 0 28px 20px; padding: 12px 15px; background: rgba(167,139,250,0.06); border: 1px solid rgba(167,139,250,0.15); border-radius: 12px; color: rgba(167,139,250,0.8); font-size: 12.5px; cursor: pointer; transition: all 0.18s; }
         .rd-report-link:hover { background: rgba(167,139,250,0.11); color: #c4b5fd; }
 
-        /* Action section */
         .rd-actions { padding: 20px 28px; border-top: 1px solid rgba(255,255,255,0.06); }
         .rd-actions-lbl { font-size: 9.5px; font-family: 'DM Mono', monospace; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.3); margin-bottom: 12px; }
         .rd-btn { display: inline-flex; align-items: center; gap: 7px; padding: 11px 22px; border-radius: 11px; font-size: 13px; font-weight: 600; font-family: 'DM Sans', sans-serif; cursor: pointer; border: none; transition: all 0.2s; }
@@ -131,16 +123,12 @@ export const ReimbursementDetail: React.FC = () => {
         .rd-btn-paid    { background: rgba(96,165,250,0.10); color: #60a5fa; border: 1px solid rgba(96,165,250,0.25); }
         .rd-btn-paid:hover:not(:disabled) { background: rgba(96,165,250,0.18); }
 
-        /* Employee read-only notice */
         .rd-readonly { display: flex; align-items: center; gap: 9px; padding: 12px 15px; background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.15); border-radius: 11px; font-size: 12.5px; color: rgba(251,191,36,0.75); margin: 0 28px 20px; }
 
-        /* Error */
         .rd-error { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(248,113,113,0.06); border: 1px solid rgba(248,113,113,0.18); border-radius: 10px; color: #fca5a5; font-size: 12.5px; margin: 0 28px 16px; }
 
-        /* Toast */
         .rd-toast { position: fixed; bottom: 2rem; right: 1.5rem; background: #1a1a2e; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 18px; font-size: 13px; color: rgba(255,255,255,0.85); box-shadow: 0 8px 32px rgba(0,0,0,0.45); z-index: 999; font-family: 'DM Sans', sans-serif; }
 
-        /* Loader */
         .rd-loader { min-height: 60vh; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; }
         .rd-spin { width: 28px; height: 28px; border-radius: 50%; border: 2px solid rgba(167,139,250,0.15); border-top-color: #a78bfa; animation: rd-spin 0.9s linear infinite; }
         @keyframes rd-spin { to { transform: rotate(360deg); } }
@@ -168,7 +156,7 @@ export const ReimbursementDetail: React.FC = () => {
 
               {/* Header */}
               <div className="rd-header">
-                <div className="rd-title-wrap">
+                <div>
                   <div className="rd-eyebrow">Expense Claim</div>
                   <div className="rd-title">{claim.title}</div>
                   <div className="rd-date">Expense date: {fmt(claim.expenseDate)}</div>
@@ -238,15 +226,13 @@ export const ReimbursementDetail: React.FC = () => {
                   <div className="rd-field-lbl" style={{ marginBottom: 8 }}>Receipts</div>
                   <div>
                     {(claim as any).receipts.map((r: any, i: number) => (
-                      <a
+                      <button
                         key={i}
-  href={`${process.env.REACT_APP_API_URL}/${r.url}`}
-  target="_blank"
-  rel="noopener noreferrer"
-  className="rd-receipt-btn"
->
-  <Download size={13} /> {r.name || `Receipt ${i + 1}`}
-</a>
+                        className="rd-receipt-btn"
+                        onClick={() => openReceipt(r.url)}
+                      >
+                        <Download size={13} /> {r.name || `Receipt ${i + 1}`}
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -254,10 +240,7 @@ export const ReimbursementDetail: React.FC = () => {
 
               {/* Monthly Report deep-link */}
               {(claim as any).monthlyReport && (
-                <div
-                  className="rd-report-link"
-                  onClick={() => navigate('/monthly-report')}
-                >
+                <div className="rd-report-link" onClick={() => navigate('/monthly-report')}>
                   <FileText size={14} />
                   <span>This claim is linked to a Monthly Report — click to view</span>
                 </div>
@@ -270,7 +253,7 @@ export const ReimbursementDetail: React.FC = () => {
                 </div>
               )}
 
-              {/* ── Privileged: Approve / Reject / Paid ── */}
+              {/* Privileged: Approve / Reject / Paid */}
               {isPrivileged && claim.status !== 'Paid' && (
                 <div className="rd-actions">
                   <div className="rd-actions-lbl">Update Status</div>
@@ -315,7 +298,7 @@ export const ReimbursementDetail: React.FC = () => {
                 </div>
               )}
 
-              {/* ── Employee: read-only notice ── */}
+              {/* Employee: read-only notice */}
               {!isPrivileged && claim.status === 'Pending' && (
                 <div className="rd-readonly">
                   <Clock size={14} />
