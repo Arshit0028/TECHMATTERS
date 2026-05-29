@@ -338,7 +338,8 @@ export const EmployeeMonthlyReport: React.FC = () => {
 
         let mergedReport = r;
         try {
-          const tasksRes = await api.get(`/tasks?assignee=${user?._id}`);
+          // const tasksRes = await api.get(`/tasks?assignee=${user?._id}`);
+          const tasksRes = await api.get(`/tasks`);
           const allTasks: TaskEntry[] = Array.isArray(tasksRes.data)
             ? tasksRes.data
             : Array.isArray(tasksRes.data?.data)  ? tasksRes.data.data
