@@ -62,32 +62,80 @@ const deleteFileIfExists = async (filePath) => {
 };
 
 // ─── GET all tasks ─────────────────────────────────────────────────────────────
+// Supports optional ?month=N&year=N filtering: only returns tasks whose date
+// range (startDate / endDate / dueDate) overlaps the requested month.
+// Undated tasks (no startDate, endDate, or dueDate) are always included.
 router.get("/", [auth, can("tasks", "read")], async (req, res) => {
   try {
     const isAdmin = ADMIN_ROLES.includes(req.user.accessLevel);
-    const { project, status, search, assignee } = req.query;
+    const { project, status, search, assignee, month, year } = req.query;
 
-    const filter = {};
+    // Build filter as an array of conditions, combined with $and at the end.
+    // This avoids $or / $and conflicts when multiple conditions each use $or.
+    const andConditions = [];
 
-    // Non-admins see tasks they created (assigner) OR tasks assigned to them
+    // ── Access control ────────────────────────────────────────────────────────
     if (!isAdmin) {
-      filter.$or = [{ assignee: req.user.id }, { assigner: req.user.id }];
+      if (assignee) {
+        // Strict assignee filter (used by the monthly-report task fetch).
+        // Drop the broad "me as assigner OR assignee" rule so the result is exact.
+        andConditions.push({ assignee });
+      } else {
+        andConditions.push({
+          $or: [{ assignee: req.user.id }, { assigner: req.user.id }],
+        });
+      }
+    } else if (assignee) {
+      andConditions.push({ assignee });
     }
 
-    // ── Explicit assignee filter (used by the monthly report) ──
-    // When an assignee is requested, scope strictly to that assignee so the
-    // report's task list matches exactly who the tasks belong to.
-    if (assignee) {
-      filter.assignee = assignee;
-      // For a non-admin, drop the broad $or so the assignee filter is exact.
-      if (!isAdmin) delete filter.$or;
+    // ── Simple scalar filters ─────────────────────────────────────────────────
+    if (project) andConditions.push({ project });
+    if (status) andConditions.push({ status });
+    if (search) andConditions.push({ $text: { $search: search } });
+
+    // ── Month / year date-range filter ────────────────────────────────────────
+    // A task is "in" the requested month when ANY of the following hold:
+    //   • startDate falls within the month
+    //   • endDate   falls within the month
+    //   • dueDate   falls within the month
+    //   • task spans the entire month (start ≤ monthEnd AND end ≥ monthStart)
+    //   • task has no date fields at all (undated tasks are always included)
+    if (month && year) {
+      const m = parseInt(month, 10);
+      const y = parseInt(year, 10);
+
+      if (!isNaN(m) && !isNaN(y) && m >= 1 && m <= 12) {
+        const startOfMonth = new Date(y, m - 1, 1);
+        const endOfMonth = new Date(y, m, 0, 23, 59, 59, 999);
+
+        andConditions.push({
+          $or: [
+            // startDate within month
+            { startDate: { $gte: startOfMonth, $lte: endOfMonth } },
+            // endDate within month
+            { endDate: { $gte: startOfMonth, $lte: endOfMonth } },
+            // dueDate within month
+            { dueDate: { $gte: startOfMonth, $lte: endOfMonth } },
+            // task spans the month (started before / ends after)
+            {
+              startDate: { $lte: endOfMonth },
+              endDate: { $gte: startOfMonth },
+            },
+            // undated tasks — null matches both null and missing fields in MongoDB
+            { startDate: null, endDate: null, dueDate: null },
+          ],
+        });
+      }
     }
 
-    if (project) filter.project = project;
-    if (status) filter.status = status;
-    if (search) {
-      filter.$text = { $search: search };
-    }
+    // Collapse conditions into a single Mongoose filter object
+    const filter =
+      andConditions.length === 0
+        ? {}
+        : andConditions.length === 1
+          ? andConditions[0]
+          : { $and: andConditions };
 
     const tasks = await Task.find(filter)
       .populate("project", "name")

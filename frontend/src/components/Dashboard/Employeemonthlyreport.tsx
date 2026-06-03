@@ -126,25 +126,68 @@ const fmt = (d?: string | null): string => {
 const prevMonth   = (m: number, y: number) => m === 1  ? { m: 12, y: y - 1 } : { m: m - 1, y };
 const nextMonthOf = (m: number, y: number) => m === 12 ? { m: 1,  y: y + 1 } : { m: m + 1, y };
 
-// ─── FIX: mergeTasksWithReport ────────────────────────────────────────────────
-// Previously only copied isDone/doneNote/undoneNote from the saved report,
-// discarding startDate/endDate/priority/status/project/assignedBy from live tasks.
+// ─── isTaskRelevantToMonth ────────────────────────────────────────────────────
+// Returns true when a task's date range overlaps with the given month/year.
+// Undated tasks (no startDate, endDate, or dueDate) are always considered
+// relevant — they are general tasks with no month affinity.
 //
-// New behaviour:
-//   1. Base = live task from API (has all current field values including dates).
-//   2. Overlay = report-saved fields: isDone, doneNote, undoneNote (employee edits).
-//   3. Report tasks whose _id no longer appears in allTasks are DROPPED
-//      (they were deleted from the system).
+// Overlap rules:
+//   • startDate falls within the month
+//   • endDate   falls within the month
+//   • dueDate   falls within the month
+//   • task spans the month (startDate ≤ monthEnd AND endDate ≥ monthStart)
+//   • no date fields at all → always include
+const isTaskRelevantToMonth = (task: TaskEntry, m: number, y: number): boolean => {
+  const startOfMonth = new Date(y, m - 1, 1).getTime();
+  const endOfMonth   = new Date(y, m, 0, 23, 59, 59, 999).getTime();
+
+  const parseTs = (d?: string | null): number | null => {
+    if (!d) return null;
+    const part = d.includes('T') ? d.split('T')[0] : d;
+    const [py, pm, pd] = part.split('-').map(Number);
+    if (isNaN(py) || isNaN(pm) || isNaN(pd)) return null;
+    return new Date(py, pm - 1, pd).getTime();
+  };
+
+  const start = parseTs(task.startDate);
+  const end   = parseTs(task.endDate);
+  const due   = parseTs(task.dueDate);
+
+  // No date info at all → always include
+  if (start === null && end === null && due === null) return true;
+
+  if (start !== null && start >= startOfMonth && start <= endOfMonth) return true;
+  if (end   !== null && end   >= startOfMonth && end   <= endOfMonth) return true;
+  if (due   !== null && due   >= startOfMonth && due   <= endOfMonth) return true;
+  // Task spans the whole month (started before, ends after)
+  if (start !== null && end !== null && start <= endOfMonth && end >= startOfMonth) return true;
+
+  return false;
+};
+
+// ─── mergeTasksWithReport ─────────────────────────────────────────────────────
+// Merges live task metadata with report-saved progress fields.
+//
+// KEY CHANGE: reportTasks are now filtered to only those present in the live
+// (month-relevant) task set. This drops:
+//   • Tasks deleted from the system (not in live at all)
+//   • Tasks from other months (their dates put them outside this month's live set)
+//
+// For tasks that ARE in both sets:
+//   Base  = live task (all current metadata: dates, project, priority, status)
+//   Overlay = report fields: isDone, doneNote, undoneNote (employee edits)
 const mergeTasksWithReport = (
-  allTasks: TaskEntry[],     // live tasks from /tasks — metadata enrichment only
-  reportTasks: TaskEntry[],  // server report tasks — authoritative for existence
+  allTasks: TaskEntry[],     // month-relevant live tasks from the API
+  reportTasks: TaskEntry[],  // tasks stored on the server report
 ): TaskEntry[] => {
   const liveMap = new Map(allTasks.map(t => [t._id, t]));
-  return reportTasks.map(rt => {
-    const live = liveMap.get(rt._id);
-    // live metadata as base, report progress (isDone/notes/title) on top
-    return live ? { ...live, ...rt } : rt;
-  });
+  return reportTasks
+    .filter(rt => liveMap.has(rt._id))   // ← drop tasks not in this month's live set
+    .map(rt => {
+      const live = liveMap.get(rt._id)!;
+      // live metadata as base, report progress (isDone / notes) on top
+      return { ...live, ...rt };
+    });
 };
 
 // ─── Section wrapper ──────────────────────────────────────────────────────────
@@ -267,12 +310,14 @@ export const EmployeeMonthlyReport: React.FC = () => {
     planDirtyRef.current    = false;
   }, []);
 
-  // ─── FIX: applyFetchedTasks now uses the improved mergeTasksWithReport ────
-  // This means startDate/endDate/priority/status all come from the live task,
-  // and deleted tasks are filtered out automatically.
+  // ─── applyFetchedTasks ────────────────────────────────────────────────────
+  // Pre-filters tasks to only those relevant to the current month/year before
+  // merging with the report. This is the second line of defence (the first
+  // being the month/year query param sent to the backend).
   const applyFetchedTasks = useCallback((r: MonthlyReport, tasks: TaskEntry[]): MonthlyReport => {
-    return { ...r, tasks: mergeTasksWithReport(tasks, r.tasks || []) };
-  }, []);
+    const relevant = tasks.filter(t => isTaskRelevantToMonth(t, month, year));
+    return { ...r, tasks: mergeTasksWithReport(relevant, r.tasks || []) };
+  }, [month, year]);
 
   const applyUserToggles = useCallback((r: MonthlyReport): MonthlyReport => {
     if (userToggles.current.size === 0) return r;
@@ -297,21 +342,57 @@ export const EmployeeMonthlyReport: React.FC = () => {
     }
   }, []);
 
+  // ─── Clear month-scoped caches whenever the viewed month or year changes ──
+  // Must be registered before the fetchAll effect so it runs first.
+  useEffect(() => {
+    confirmedLinkedTaskIds.current.clear();
+    userToggles.current.clear();
+    pendingToggles.current.clear();
+    togglesInFlight.current = false;
+    // Also reset the last known status so status-change toasts fire correctly
+    // for the newly selected month.
+    lastKnownStatus.current = null;
+  }, [month, year]);
+
   // ── Core fetch ────────────────────────────────────────────────────────────
+  // Performance design:
+  //   Phase 1 — one parallel Promise.allSettled for ALL data (report + tasks
+  //             + activities + reimbursements + projects + users).
+  //             The report is merged and displayed the moment this resolves —
+  //             no sequential waterfall, no second network round-trip.
+  //   Phase 2 — link-tasks fires in a detached background job so it never
+  //             blocks the UI. The second GET /monthly-reports/mine that used
+  //             to follow link-tasks is gone; the state already reflects the
+  //             correct merged data from Phase 1.
   const fetchAll = useCallback(async (silent = false) => {
     silent ? setRefreshing(true) : setLoading(true);
     setError('');
     try {
       const prev = prevMonth(month, year);
 
-      const [thisRes, prevRes, actRes, reimbRes, projRes, usersRes] = await Promise.allSettled([
-        api.get(`/monthly-reports/mine?month=${month}&year=${year}`),
-        api.get(`/monthly-reports/mine?month=${prev.m}&year=${prev.y}`),
-        api.get(`/activities?assignee=${user?._id}`),
-        api.get(`/reimbursements?month=${month}&year=${year}&limit=100`),
-        getProjects(),
-        getUsers(),
-      ]);
+      // ── Phase 1: everything in one parallel batch ─────────────────────────
+      const [thisRes, prevRes, actRes, reimbRes, projRes, usersRes, tasksRes] =
+        await Promise.allSettled([
+          api.get(`/monthly-reports/mine?month=${month}&year=${year}`),
+          api.get(`/monthly-reports/mine?month=${prev.m}&year=${prev.y}`),
+          api.get(`/activities?assignee=${user?._id}`),
+          api.get(`/reimbursements?month=${month}&year=${year}&limit=100`),
+          getProjects(),
+          getUsers(),
+          api.get(`/tasks?month=${month}&year=${year}`), // ← parallel now, not sequential
+        ]);
+
+      // ── Resolve tasks immediately ─────────────────────────────────────────
+      const allTasks: TaskEntry[] = (() => {
+        if (tasksRes.status !== 'fulfilled') return [];
+        const d = tasksRes.value.data;
+        return Array.isArray(d) ? d
+          : Array.isArray(d?.data)  ? d.data
+          : Array.isArray(d?.tasks) ? d.tasks
+          : [];
+      })();
+      setFetchedTasks(allTasks);
+      fetchedTasksRef.current = allTasks;
 
       if (projRes.status === 'fulfilled') {
         const d = projRes.value as any;
@@ -336,57 +417,10 @@ export const EmployeeMonthlyReport: React.FC = () => {
         }
         lastKnownStatus.current = r.status;
 
-        let mergedReport = r;
-        try {
-          // const tasksRes = await api.get(`/tasks?assignee=${user?._id}`);
-          const tasksRes = await api.get(`/tasks`);
-          const allTasks: TaskEntry[] = Array.isArray(tasksRes.data)
-            ? tasksRes.data
-            : Array.isArray(tasksRes.data?.data)  ? tasksRes.data.data
-            : Array.isArray(tasksRes.data?.tasks) ? tasksRes.data.tasks
-            : [];
+        // ── Build merged report from parallel data — no extra round trips ───
+        let mergedReport = applyUserToggles(applyFetchedTasks(r, allTasks));
 
-          setFetchedTasks(allTasks);
-          fetchedTasksRef.current = allTasks;
-
-          // ── FIX: Only link tasks that are actually live (exist in allTasks) ──
-          // Do NOT re-link from r.tasks — that list may include deleted tasks.
-          const liveTaskIds   = new Set(allTasks.map(t => t._id));
-          const canLink       = allTasks.length > 0 && r._id && !togglesInFlight.current;
-
-          if (canLink) {
-            const newTaskIds = allTasks
-              .map(t => t._id)
-              .filter(id => !confirmedLinkedTaskIds.current.has(id));
-
-            if (newTaskIds.length > 0) {
-              try {
-                // ── FIX: only send IDs of tasks that still exist ─────────────
-                const existingIds = (r.tasks || [])
-                  .map(t => t._id)
-                  .filter(id => liveTaskIds.has(id)); // drop deleted
-                const allIds = Array.from(new Set([...existingIds, ...allTasks.map(t => t._id)]));
-
-                await api.patch(`/monthly-reports/${r._id}/link-tasks`, { taskIds: allIds });
-                allTasks.forEach(t => confirmedLinkedTaskIds.current.add(t._id));
-                const refreshed = await api.get(`/monthly-reports/mine?month=${month}&year=${year}`);
-                mergedReport = applyUserToggles(applyFetchedTasks(refreshed.data, allTasks));
-              } catch {
-                mergedReport = applyUserToggles(applyFetchedTasks(r, allTasks));
-              }
-            } else {
-              mergedReport = applyUserToggles(applyFetchedTasks(r, allTasks));
-            }
-          } else {
-            mergedReport = applyUserToggles(applyFetchedTasks(r, allTasks));
-          }
-        } catch {
-          setFetchedTasks([]);
-          fetchedTasksRef.current = [];
-          mergedReport = applyUserToggles(r);
-        }
-
-        // Re-apply pending toggle states on top (belt-and-suspenders)
+        // Re-apply any in-flight toggle states (belt-and-suspenders)
         if (pendingToggles.current.size > 0) {
           mergedReport = {
             ...mergedReport,
@@ -397,11 +431,13 @@ export const EmployeeMonthlyReport: React.FC = () => {
           };
         }
 
+        // ── Display immediately — this is the only UI-blocking step ─────────
         setReport(mergedReport);
         reportRef.current = mergedReport;
+        setLoading(false);
+        setRefreshing(false);
 
-        // ── FIX: drop cached toggle/link state for tasks that no longer exist ──
-        // Prevents a deleted task from being re-applied on top via userToggles.
+        // Drop stale cached state for tasks no longer in this report
         const liveReportIds = new Set(mergedReport.tasks.map(t => t._id));
         userToggles.current.forEach((_v, id) => {
           if (!liveReportIds.has(id)) userToggles.current.delete(id);
@@ -421,6 +457,31 @@ export const EmployeeMonthlyReport: React.FC = () => {
           );
           setMyReimbs(allReimbs.filter(rb => !linkedIds.includes(rb._id)));
         }
+
+        // ── Phase 2: link-tasks in a detached background job ─────────────────
+        // Runs after the UI is already showing. Never blocks rendering.
+        // No second GET /monthly-reports/mine — the merged state is already correct.
+        const liveTaskIds  = new Set(allTasks.map(t => t._id));
+        const needsLinking = allTasks.length > 0 && r._id && !togglesInFlight.current
+          && allTasks.some(t => !confirmedLinkedTaskIds.current.has(t._id));
+
+        if (needsLinking) {
+          void (async () => {
+            try {
+              const existingIds = (r.tasks || [])
+                .map(t => t._id)
+                .filter(id => liveTaskIds.has(id));
+              const allIds = Array.from(new Set([...existingIds, ...allTasks.map(t => t._id)]));
+              await api.patch(`/monthly-reports/${r._id}/link-tasks`, { taskIds: allIds });
+              allTasks.forEach(t => confirmedLinkedTaskIds.current.add(t._id));
+            } catch {
+              // background sync failed — not critical, will retry on next fetchAll
+            }
+          })();
+        } else {
+          allTasks.forEach(t => confirmedLinkedTaskIds.current.add(t._id));
+        }
+
       } else {
         const reason = thisRes.reason;
         if (reason?.response?.status === 404) {
@@ -430,7 +491,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
             try {
               const created = await createReportInternal(month, year);
               if (created) {
-                const withTasks = applyUserToggles(applyFetchedTasks(created, fetchedTasksRef.current));
+                const withTasks = applyUserToggles(applyFetchedTasks(created, allTasks));
                 setReport(withTasks);
                 reportRef.current = withTasks;
                 lastKnownStatus.current = withTasks.status;
@@ -1151,33 +1212,33 @@ export const EmployeeMonthlyReport: React.FC = () => {
                 {/* ── THIS MONTH ── */}
                 {activeTab === 'this' && (
                   <motion.div key="this" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}>
-                  {!report ? (
-  (() => {
-    const nowDate = new Date();
-    const isCurrentMonth = month === nowDate.getMonth() + 1 && year === nowDate.getFullYear();
-    return isCurrentMonth ? (
-      <div className="empty-state" style={{ padding: '4rem 0' }}>
-        <div className="emr-spin" />
-        <span>Preparing your report…</span>
-      </div>
-    ) : (
-      <div className="empty-state" style={{ padding: '4rem 0' }}>
-        <FileText size={36} style={{ opacity: 0.1 }} />
-        <span>No report found for {MONTHS[month - 1]} {year}</span>
-        <button className="btn btn-primary" onClick={createReport}><Plus size={16} /> Create Report</button>
-        <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', maxWidth: 280, textAlign: 'center' }}>Start tracking your tasks, activities, and plan for next month.</p>
-      </div>
-    );
-  })()
-) : (
+                    {!report ? (
+                      (() => {
+                        const nowDate = new Date();
+                        const isCurrentMonth = month === nowDate.getMonth() + 1 && year === nowDate.getFullYear();
+                        return isCurrentMonth ? (
+                          <div className="empty-state" style={{ padding: '4rem 0' }}>
+                            <div className="emr-spin" />
+                            <span>Preparing your report…</span>
+                          </div>
+                        ) : (
+                          <div className="empty-state" style={{ padding: '4rem 0' }}>
+                            <FileText size={36} style={{ opacity: 0.1 }} />
+                            <span>No report found for {MONTHS[month - 1]} {year}</span>
+                            <button className="btn btn-primary" onClick={createReport}><Plus size={16} /> Create Report</button>
+                            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', maxWidth: 280, textAlign: 'center' }}>Start tracking your tasks, activities, and plan for next month.</p>
+                          </div>
+                        );
+                      })()
+                    ) : (
                       <>
                         {/* Tasks */}
                         <Section icon={<CheckSquare size={13} />} title="This Month's Tasks" badge={`${tasksDone}/${tasksTotal} done`} accent="#34d399">
                           {report.tasks.length === 0 ? (
                             <div className="empty-state">
                               <Square size={28} style={{ opacity: 0.1 }} />
-                              <span>No tasks assigned yet</span>
-                              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)' }}>Tasks come from the Tasks module and are assigned by your manager.</span>
+                              <span>No tasks for {MONTHS[month - 1]} {year}</span>
+                              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)' }}>Tasks assigned during this month appear here automatically.</span>
                             </div>
                           ) : report.tasks.map(task => {
                             const isSaving = savingTaskIds.has(task._id);

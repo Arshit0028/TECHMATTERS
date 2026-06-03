@@ -82,11 +82,11 @@ export const Navbar = () => {
       label: 'Dashboard',
     },
 
-    {
-      to: '/monthly-report',
-      icon: <FileText size={15} />,
-      label: 'Report',
-    },
+    // {
+    //   to: '/monthly-report',
+    //   icon: <FileText size={15} />,
+    //   label: 'Report',
+    // },
 
     {
       to: '/projects',
