@@ -72,6 +72,16 @@ app.use("/api", rateLimit({ windowMs: 60 * 1000, max: 300 }));
 /* ============================================================
    ROUTES  (unchanged — same mounts, same order)
 ============================================================ */
+// Root — gives a friendly response instead of "Cannot GET /".
+// Useful for uptime probes (Render/Railway/etc.) that ping the base URL.
+app.get("/", (req, res) =>
+  res.json({
+    service: "TechMatters Workforce API",
+    status: "ok",
+    docs: "All endpoints are under /api",
+  }),
+);
+
 app.get("/api/health", (req, res) =>
   res.json({ status: "ok", uptime: process.uptime() }),
 );
@@ -87,6 +97,16 @@ app.use("/api/admin", require("./routes/admin"));
 app.use("/api/time-entries", require("./routes/timeEntries"));
 app.use("/api/performance", require("./routes/performance"));
 app.use("/api/monthly-reports", require("./routes/monthlyReports"));
+
+/* ============================================================
+   404 — unknown route (must come AFTER all routes, BEFORE the
+   error handler). Returns JSON so API clients get a consistent shape.
+============================================================ */
+app.use((req, res) => {
+  res
+    .status(404)
+    .json({ msg: `Route not found: ${req.method} ${req.originalUrl}` });
+});
 
 /* ============================================================
    CENTRAL ERROR HANDLER
