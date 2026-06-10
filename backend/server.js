@@ -26,29 +26,57 @@ app.use(
   }),
 );
 
-// 2) CORS — locked to known origins instead of the previous wide-open cors().
-//    CLIENT_ORIGIN can be a comma-separated list (prod + staging + localhost).
-//    Falls back to localhost dev ports if the env var is unset.
+// 2) CORS — allow known origins. CLIENT_ORIGIN can be a comma-separated list
+//    (prod + staging + localhost). The defaults below mean it works even if the
+//    env var is never set on Render.
+//
+//    IMPORTANT: when an origin is NOT allowed we call callback(null, false)
+//    (a clean CORS denial). We must NEVER throw here — throwing turns the
+//    preflight OPTIONS request into a 500, which is what blocked login.
 const allowedOrigins = (
-  process.env.CLIENT_ORIGIN || "http://localhost:5173,http://localhost:3000"
+  process.env.CLIENT_ORIGIN ||
+  [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://techmatters-blue.vercel.app", // production frontend (Vercel)
+    "https://techmatters.onrender.com", // backend host (same-origin calls)
+  ].join(",")
 )
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      // Allow same-origin / server-to-server / curl (no Origin header)
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error(`CORS: origin ${origin} not allowed`));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "x-auth-token", "Authorization"],
-  }),
-);
+function isAllowedOrigin(origin) {
+  if (allowedOrigins.includes(origin)) return true;
+  // Safety net: allow Vercel + Render subdomains (covers preview/branch deploys
+  // like techmatters-blue-git-xyz.vercel.app without listing each one).
+  try {
+    const host = new URL(origin).hostname;
+    if (host.endsWith(".vercel.app")) return true;
+    if (host === "onrender.com" || host.endsWith(".onrender.com")) return true;
+  } catch {
+    /* malformed origin → not allowed */
+  }
+  return false;
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    // No Origin header = same-origin / server-to-server / curl → allow.
+    if (!origin) return callback(null, true);
+    // Allowed → reflect the origin. Not allowed → clean denial (NEVER throw).
+    return callback(null, isAllowedOrigin(origin));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "x-auth-token", "Authorization"],
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+// Explicitly answer every preflight so OPTIONS never falls through to a route
+// (or the error handler) and 500s.
+app.options("*", cors(corsOptions));
 
 // 3) Body parsing with an explicit size cap (prevents oversized-payload abuse).
 app.use(express.json({ limit: "2mb" }));
