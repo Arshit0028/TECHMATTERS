@@ -14,6 +14,9 @@ const EmployeeMonthlyPlanSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 
+// ── Production indexes ────────────────────────────────────────────────────────
+EmployeeMonthlyPlanSchema.index({ user: 1 }, { unique: true });
+
 module.exports = mongoose.model(
   "EmployeeMonthlyPlan",
   EmployeeMonthlyPlanSchema,

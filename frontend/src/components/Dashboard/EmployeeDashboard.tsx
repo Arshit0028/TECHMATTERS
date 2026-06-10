@@ -247,18 +247,13 @@ export const EmployeeDashboard: React.FC = () => {
     setLoading(true);
     setError('');
 
-    // Why setTimeout(fn, 0)?
-    // React runs passive effects bottom-up: child effects fire BEFORE parent
-    // effects in the same commit. AuthProvider (parent) sets the axios
-    // Authorization header in its own useEffect — but Dashboard fires first,
-    // so API calls go out without the token → server returns empty arrays.
-    //
-    // setTimeout(fn, 0) defers the API calls to the next macrotask.
-    // By then every effect in the current render — including AuthProvider's
-    // interceptor setup — has already run. Zero perceptible delay for the user.
-    const t = setTimeout(async () => {
-      if (aborted) return;
-
+    // The axios request interceptor reads the token fresh from localStorage on
+    // every call, and login() writes the token BEFORE setUser() triggers this
+    // mount — so the token is always present here. No deferral needed.
+    // This effect runs as soon as userId is a real value (see the _id fix in
+    // the auth response: login now returns _id, matching /me, so userId is
+    // populated on first login instead of only after a refresh).
+    (async () => {
       const [pRes, tRes, aRes, rRes] = await Promise.allSettled([
         getProjects(),
         getTasks({ assignee: userId }),
@@ -288,9 +283,9 @@ export const EmployeeDashboard: React.FC = () => {
       }
 
       setLoading(false);
-    }, 0);
+    })();
 
-    return () => { aborted = true; clearTimeout(t); };
+    return () => { aborted = true; };
   }, [userId, refreshTick]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────

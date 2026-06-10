@@ -120,4 +120,13 @@ const ProjectSchema = new mongoose.Schema(
   },
 );
 
+// ── Production indexes ────────────────────────────────────────────────────────
+// buildUserFilter() matches on teamMembers / projectManager / createdBy.
+// Lists sort by updatedAt and filter by status.
+ProjectSchema.index({ teamMembers: 1 });
+ProjectSchema.index({ projectManager: 1 });
+ProjectSchema.index({ createdBy: 1 });
+ProjectSchema.index({ status: 1, updatedAt: -1 });
+ProjectSchema.index({ name: "text", description: "text" });
+
 module.exports = mongoose.model("Project", ProjectSchema);

@@ -26,10 +26,13 @@ router.post("/register", async (req, res) => {
         res.json({
           token,
           user: {
-            id: user.id,
+            _id: user._id, // ← frontend keys everything on _id (matches /me)
+            id: user.id, // kept for backward compatibility
             name: user.name,
             email: user.email,
             accessLevel: user.accessLevel,
+            reportingManager: user.reportingManager,
+            permissions: user.permissions,
           },
         });
       },
@@ -67,10 +70,13 @@ router.post("/login", async (req, res) => {
         res.json({
           token,
           user: {
-            id: user.id,
+            _id: user._id, // ← frontend keys everything on _id (matches /me)
+            id: user.id, // kept for backward compatibility
             name: user.name,
             email: user.email,
             accessLevel: user.accessLevel,
+            reportingManager: user.reportingManager,
+            permissions: user.permissions,
           },
         });
       },

@@ -17,17 +17,37 @@ const ADMIN_ROLES = ["super-admin", "admin", "manager", "project-manager"];
      projectManager, createdBy, OR the reportingManager of any
      team member on the project
 ============================================================ */
+// ── Reportee lookup cache ─────────────────────────────────────────────────────
+// buildUserFilter previously hit the DB with User.find({ reportingManager })
+// on EVERY project request. Org charts change rarely, so we cache the reportee
+// id list per-manager for a short TTL. This removes one query per request on
+// the hot project-list path without risking stale access (60s is well under
+// any realistic "added a report, must see their projects instantly" need).
+const REPORTEE_TTL_MS = 60 * 1000;
+const reporteeCache = new Map(); // uid string -> { ids, expiresAt }
+
+async function getReporteeIds(uid) {
+  const key = uid.toString();
+  const now = Date.now();
+  const cached = reporteeCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.ids;
+
+  const User = require("../models/User");
+  const reportees = await User.find({ reportingManager: uid }, "_id").lean();
+  const ids = reportees.map((u) => u._id);
+  reporteeCache.set(key, { ids, expiresAt: now + REPORTEE_TTL_MS });
+  return ids;
+}
+
 async function buildUserFilter(user, extraFilter = {}) {
   if (ADMIN_ROLES.includes(user.accessLevel)) {
     return extraFilter; // no restriction
   }
 
-  const User = require("../models/User");
   const uid = new mongoose.Types.ObjectId(user.id);
 
-  // Find all users who report to this user
-  const reportees = await User.find({ reportingManager: uid }, "_id").lean();
-  const reporteeIds = reportees.map((u) => u._id);
+  // Find all users who report to this user (cached — see getReporteeIds)
+  const reporteeIds = await getReporteeIds(uid);
 
   // User can see a project if they are:
   // 1. A direct team member

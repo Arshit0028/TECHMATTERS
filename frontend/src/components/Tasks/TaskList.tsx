@@ -1,5 +1,5 @@
 // src/components/Tasks/TaskList.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Eye, Edit, Trash2, X } from 'lucide-react';
@@ -7,6 +7,7 @@ import { getTasks, deleteTask, getProjects } from '../../api/client';
 import { usePermission } from '../../hooks/usePermission';
 import { useAuth } from '../../context/AuthContext';
 import type { Task, Project } from '../types/index';
+import { useQuery, invalidate } from '../../hooks/useQuery';
 
 // ─── Toast Notification ──────────────────────────────────────────────────────
 const notify = (message: string, type: 'success' | 'error' = 'success') => {
@@ -69,9 +70,6 @@ const PRIORITY_STYLES: Record<string, string> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export const TaskList: React.FC = () => {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Filters
@@ -91,43 +89,54 @@ export const TaskList: React.FC = () => {
     usePermission('tasks', 'delete') ||
     ['super-admin', 'admin'].includes(user?.accessLevel || '');
 
-  // ── Load data ───────────────────────────────────────────────────────────────
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [projectsRes, tasksRes] = await Promise.all([
-        getProjects(),
-        getTasks({
+  // ── Data via useQuery (cached + deduped + revalidated) ──────────────────────
+  // Projects are shared app-wide under a stable key, so navigating between
+  // Tasks/Projects/Dashboard reuses one cached response instead of refetching.
+  const { data: projectsData } = useQuery<Project[]>(
+    'projects:list',
+    async () => extractProjects(await getProjects()),
+  );
+  const projects = useMemo(() => projectsData ?? [], [projectsData]);
+
+  // Tasks are keyed by the active filter set, so each distinct filter
+  // combination is cached independently and instantly re-served when revisited.
+  const tasksKey = `tasks:list:${filterProject || 'all'}:${filterStatus || 'all'}:${debouncedSearch || ''}`;
+  const {
+    data: tasksData,
+    loading: tasksLoading,
+    mutate: mutateTasks,
+  } = useQuery<Task[]>(
+    tasksKey,
+    async () =>
+      extractTasks(
+        await getTasks({
           project: filterProject || undefined,
           status: filterStatus || undefined,
           search: debouncedSearch || undefined,
         }),
-      ]);
-      setProjects(extractProjects(projectsRes));
-      setTasks(extractTasks(tasksRes));
-    } catch (err) {
-      console.error(err);
-      notify('Failed to load tasks', 'error');
-    } finally {
-      setLoading(false);
-    }
-  }, [filterProject, filterStatus, debouncedSearch]);
+      ),
+  );
+  const tasks = useMemo(() => tasksData ?? [], [tasksData]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  // Only show the full-screen skeleton on the very first load (no cache yet).
+  const loading = tasksLoading;
 
   // ── Delete with permission-aware error handling ─────────────────────────────
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this task permanently? This action cannot be undone.')) return;
 
-    const previousTasks = [...tasks];
+    const previousTasks = tasks;
     setDeletingId(id);
-    setTasks(prev => prev.filter(t => t._id !== id));
+    // Optimistic: drop from the cached list immediately.
+    mutateTasks(prev => (prev ?? []).filter(t => t._id !== id));
 
     try {
       await deleteTask(id);
       notify('Task deleted successfully');
+      // Invalidate every tasks list variant so other filter views stay correct.
+      invalidate('tasks:list', true);
     } catch (err: any) {
-      setTasks(previousTasks); // rollback on error
+      mutateTasks(previousTasks); // rollback on error
       const errorMsg =
         err?.response?.data?.msg ||
         err?.response?.data?.message ||

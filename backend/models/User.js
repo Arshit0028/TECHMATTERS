@@ -69,4 +69,11 @@ UserSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
+// ── Production indexes ────────────────────────────────────────────────────────
+// reportingManager drives the reportee lookups in project scoping and HR views.
+// accessLevel + status power role/status filtered user lists.
+// (email and employeeId already have unique indexes from their field options.)
+UserSchema.index({ reportingManager: 1 });
+UserSchema.index({ accessLevel: 1, status: 1 });
+
 module.exports = mongoose.model("User", UserSchema);

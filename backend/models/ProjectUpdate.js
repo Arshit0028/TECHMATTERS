@@ -14,4 +14,9 @@ const ProjectUpdateSchema = new mongoose.Schema({
   completedAt: Date,
 });
 
+// ── Production indexes ────────────────────────────────────────────────────────
+ProjectUpdateSchema.index({ user: 1, date: -1 });
+ProjectUpdateSchema.index({ project: 1, date: -1 });
+ProjectUpdateSchema.index({ isCompleted: 1 });
+
 module.exports = mongoose.model("ProjectUpdate", ProjectUpdateSchema);

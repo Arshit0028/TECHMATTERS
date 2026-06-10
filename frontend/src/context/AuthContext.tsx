@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { login as apiLogin, register as apiRegister, getMe } from '../api/client';
+import { clearCache } from '../lib/queryCache';
 import type { User } from '../components/types/index';
 
 interface AuthContextType {
@@ -65,6 +66,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    clearCache(); // drop all cached query data so it never leaks to the next session
     setUser(null);
   };
 

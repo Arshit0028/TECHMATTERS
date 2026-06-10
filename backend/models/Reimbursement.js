@@ -43,4 +43,12 @@ const ReimbursementSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// ── Production indexes ────────────────────────────────────────────────────────
+// Reimbursements are listed per-employee and filtered by status (approval
+// queues), routed by submittedTo (approver views), and scoped by project.
+ReimbursementSchema.index({ employee: 1, status: 1 });
+ReimbursementSchema.index({ employee: 1, expenseDate: -1 });
+ReimbursementSchema.index({ submittedTo: 1, status: 1 });
+ReimbursementSchema.index({ project: 1 });
+
 module.exports = mongoose.model("Reimbursement", ReimbursementSchema);

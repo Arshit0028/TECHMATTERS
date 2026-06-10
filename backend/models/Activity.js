@@ -41,4 +41,12 @@ const ActivitySchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// ── Production indexes ────────────────────────────────────────────────────────
+// Activities are queried by assignee (employee dashboards / monthly reports),
+// by the parent task, and filtered by status. These cover the hot paths.
+ActivitySchema.index({ assignee: 1, status: 1 });
+ActivitySchema.index({ assignee: 1, startDate: 1 });
+ActivitySchema.index({ task: 1 });
+ActivitySchema.index({ endDate: 1 });
+
 module.exports = mongoose.model("Activity", ActivitySchema);

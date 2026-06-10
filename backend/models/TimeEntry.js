@@ -18,4 +18,8 @@ const TimeEntrySchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// ── Production indexes ────────────────────────────────────────────────────────
+TimeEntrySchema.index({ user: 1, date: -1 });
+TimeEntrySchema.index({ project: 1, date: -1 });
+
 module.exports = mongoose.model("TimeEntry", TimeEntrySchema);
