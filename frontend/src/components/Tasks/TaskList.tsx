@@ -1,4 +1,3 @@
-// src/components/Tasks/TaskList.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -9,7 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import type { Task, Project } from '../types/index';
 import { useQuery, invalidate } from '../../hooks/useQuery';
 
-// ─── Toast Notification ──────────────────────────────────────────────────────
+// ─── Toast ────────────────────────────────────────────────────────────────────
 const notify = (message: string, type: 'success' | 'error' = 'success') => {
   const toast = document.createElement('div');
   toast.style.cssText = `
@@ -27,7 +26,7 @@ const notify = (message: string, type: 'success' | 'error' = 'success') => {
   }, 2800);
 };
 
-// ─── Debounce hook ────────────────────────────────────────────────────────────
+// ─── Debounce ─────────────────────────────────────────────────────────────────
 function useDebounce<T>(value: T, delay = 400): T {
   const [debounced, setDebounced] = useState<T>(value);
   useEffect(() => {
@@ -56,108 +55,80 @@ const extractTasks = (res: any): Task[] => {
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  'Done': 'bg-emerald-500/10 text-emerald-400',
-  'In Progress': 'bg-amber-500/10 text-amber-400',
-  'Review': 'bg-purple-500/10 text-purple-400',
-  'To Do': 'bg-blue-500/10 text-blue-400',
+  'Done':        'bg-emerald-500/10 text-emerald-400',
+  'In Progress': 'bg-amber-500/10  text-amber-400',
+  'Review':      'bg-purple-500/10 text-purple-400',
+  'To Do':       'bg-blue-500/10   text-blue-400',
 };
 
 const PRIORITY_STYLES: Record<string, string> = {
-  'High': 'text-red-400',
-  'Medium': 'text-amber-400',
-  'Low': 'text-emerald-400',
+  High:   'text-red-400',
+  Medium: 'text-amber-400',
+  Low:    'text-emerald-400',
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export const TaskList: React.FC = () => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Filters
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterProject, setFilterProject] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
+  const [searchTerm,     setSearchTerm]     = useState('');
+  const [filterProject,  setFilterProject]  = useState('');
+  const [filterStatus,   setFilterStatus]   = useState('');
   const debouncedSearch = useDebounce(searchTerm, 400);
 
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const canCreate =
-    usePermission('tasks', 'create') ||
+  const canCreate = usePermission('tasks', 'create') ||
     ['super-admin', 'admin'].includes(user?.accessLevel || '');
 
-  const canDeleteGlobal =
-    usePermission('tasks', 'delete') ||
+  const canDeleteGlobal = usePermission('tasks', 'delete') ||
     ['super-admin', 'admin'].includes(user?.accessLevel || '');
 
-  // ── Data via useQuery (cached + deduped + revalidated) ──────────────────────
-  // Projects are shared app-wide under a stable key, so navigating between
-  // Tasks/Projects/Dashboard reuses one cached response instead of refetching.
+  // ── Data ───────────────────────────────────────────────────────────────────
   const { data: projectsData } = useQuery<Project[]>(
     'projects:list',
     async () => extractProjects(await getProjects()),
   );
   const projects = useMemo(() => projectsData ?? [], [projectsData]);
 
-  // Tasks are keyed by the active filter set, so each distinct filter
-  // combination is cached independently and instantly re-served when revisited.
   const tasksKey = `tasks:list:${filterProject || 'all'}:${filterStatus || 'all'}:${debouncedSearch || ''}`;
-  const {
-    data: tasksData,
-    loading: tasksLoading,
-    mutate: mutateTasks,
-  } = useQuery<Task[]>(
+  const { data: tasksData, loading: tasksLoading, mutate: mutateTasks } = useQuery<Task[]>(
     tasksKey,
-    async () =>
-      extractTasks(
-        await getTasks({
-          project: filterProject || undefined,
-          status: filterStatus || undefined,
-          search: debouncedSearch || undefined,
-        }),
-      ),
+    async () => extractTasks(await getTasks({
+      project: filterProject  || undefined,
+      status:  filterStatus   || undefined,
+      search:  debouncedSearch || undefined,
+    })),
   );
-  const tasks = useMemo(() => tasksData ?? [], [tasksData]);
-
-  // Only show the full-screen skeleton on the very first load (no cache yet).
+  const tasks   = useMemo(() => tasksData ?? [], [tasksData]);
   const loading = tasksLoading;
 
-  // ── Delete with permission-aware error handling ─────────────────────────────
+  // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this task permanently? This action cannot be undone.')) return;
-
-    const previousTasks = tasks;
+    if (!window.confirm('Delete this task permanently? This cannot be undone.')) return;
+    const previous = tasks;
     setDeletingId(id);
-    // Optimistic: drop from the cached list immediately.
     mutateTasks(prev => (prev ?? []).filter(t => t._id !== id));
-
     try {
       await deleteTask(id);
       notify('Task deleted successfully');
-      // Invalidate every tasks list variant so other filter views stay correct.
       invalidate('tasks:list', true);
     } catch (err: any) {
-      mutateTasks(previousTasks); // rollback on error
-      const errorMsg =
-        err?.response?.data?.msg ||
-        err?.response?.data?.message ||
-        err?.message ||
-        'Failed to delete task';
-      notify(errorMsg, 'error');
-      console.error('Delete failed:', err);
+      mutateTasks(previous);
+      notify(
+        err?.response?.data?.msg || err?.response?.data?.message || err?.message || 'Failed to delete task',
+        'error'
+      );
     } finally {
       setDeletingId(null);
     }
   };
 
-  // ── Clear filters ───────────────────────────────────────────────────────────
   const hasActiveFilters = searchTerm || filterProject || filterStatus;
-  const clearFilters = () => {
-    setSearchTerm('');
-    setFilterProject('');
-    setFilterStatus('');
-  };
+  const clearFilters = () => { setSearchTerm(''); setFilterProject(''); setFilterStatus(''); };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
       <style>{`
@@ -171,14 +142,9 @@ export const TaskList: React.FC = () => {
           font-family: 'DM Sans', sans-serif;
           color: rgba(255,255,255,0.84);
         }
-        .task-card {
-          background: rgba(255,255,255,0.028);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 18px;
-          overflow: hidden;
-        }
-        .skeleton { background: linear-gradient(90deg, #1f2028 25%, #2a2b36 50%, #1f2028 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
-        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .task-card { background: rgba(255,255,255,0.028); border: 1px solid rgba(255,255,255,0.07); border-radius: 18px; overflow: hidden; }
+        .skeleton { background: linear-gradient(90deg,#1f2028 25%,#2a2b36 50%,#1f2028 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
       `}</style>
 
       <div className="task-root">
@@ -214,13 +180,9 @@ export const TaskList: React.FC = () => {
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
                 className="w-full pl-12 pr-10 py-4 bg-zinc-900 border border-zinc-700 focus:border-violet-500 rounded-3xl outline-none text-white placeholder:text-zinc-500 transition-colors"
-                aria-label="Search tasks"
               />
               {searchTerm && (
-                <button
-                  onClick={() => setSearchTerm('')}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
-                >
+                <button onClick={() => setSearchTerm('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white">
                   <X size={16} />
                 </button>
               )}
@@ -232,9 +194,7 @@ export const TaskList: React.FC = () => {
               className="px-6 py-4 bg-zinc-900 border border-zinc-700 focus:border-violet-500 rounded-3xl outline-none text-white transition-colors"
             >
               <option value="">All Projects</option>
-              {projects.map(p => (
-                <option key={p._id} value={p._id}>{p.name}</option>
-              ))}
+              {projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
             </select>
 
             <select
@@ -259,12 +219,12 @@ export const TaskList: React.FC = () => {
             )}
           </div>
 
-          {/* Table */}
+          {/* Table — Assignee column removed */}
           <div className="task-card">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-zinc-700">
-                  {['Task', 'Project', 'Assignee', 'Priority', 'Status', 'Due'].map(h => (
+                  {['Task', 'Project', 'Priority', 'Status', 'Due'].map(h => (
                     <th key={h} className="text-left py-5 px-8 text-xs font-medium text-zinc-400 uppercase tracking-widest">
                       {h}
                     </th>
@@ -277,16 +237,16 @@ export const TaskList: React.FC = () => {
                 {loading ? (
                   Array.from({ length: 6 }).map((_, i) => (
                     <tr key={i} className="border-b border-zinc-800">
-                      {Array.from({ length: 7 }).map((__, j) => (
+                      {Array.from({ length: 6 }).map((__, j) => (
                         <td key={j} className="py-5 px-8">
-                          <div className={`h-4 skeleton rounded-full ${j === 0 ? 'w-3/4' : j === 6 ? 'w-16' : 'w-1/2'}`} />
+                          <div className={`h-4 skeleton rounded-full ${j === 0 ? 'w-3/4' : j === 5 ? 'w-16' : 'w-1/2'}`} />
                         </td>
                       ))}
                     </tr>
                   ))
                 ) : tasks.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-20 text-zinc-400">
+                    <td colSpan={6} className="text-center py-20 text-zinc-400">
                       <div className="flex flex-col items-center gap-3">
                         <Search size={32} className="text-zinc-700" />
                         <p>{hasActiveFilters ? 'No tasks match your filters' : 'No tasks yet'}</p>
@@ -309,30 +269,38 @@ export const TaskList: React.FC = () => {
                         transition={{ duration: 0.2 }}
                         className="border-b border-zinc-800 hover:bg-zinc-800/50 group"
                       >
+                        {/* Task title */}
                         <td className="py-5 px-8 font-medium text-white max-w-xs">
                           <span className="truncate block">{task.title}</span>
                         </td>
+
+                        {/* Project */}
                         <td className="py-5 px-8 text-zinc-400">
-                          {task.project?.name || '—'}
+                          {(task.project as any)?.name || '—'}
                         </td>
-                        <td className="py-5 px-8 text-zinc-400">
-                          {task.assignee?.name || 'Unassigned'}
-                        </td>
+
+                        {/* Priority — no Assignee column */}
                         <td className="py-5 px-8">
                           <span className={`text-xs font-semibold ${PRIORITY_STYLES[task.priority] || 'text-zinc-400'}`}>
                             {task.priority || '—'}
                           </span>
                         </td>
+
+                        {/* Status */}
                         <td className="py-5 px-8">
                           <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-2xl ${STATUS_STYLES[task.status] || 'bg-zinc-500/10 text-zinc-400'}`}>
                             {task.status}
                           </span>
                         </td>
+
+                        {/* Due date */}
                         <td className="py-5 px-8 text-zinc-400 text-sm">
                           {task.endDate
                             ? new Date(task.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                             : '—'}
                         </td>
+
+                        {/* Actions */}
                         <td className="py-5 px-8 text-right">
                           <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
                             <button
@@ -349,11 +317,9 @@ export const TaskList: React.FC = () => {
                             >
                               <Edit size={18} />
                             </button>
-
-                            {/* 🔥 Users can delete tasks they created OR are assigned to */}
+                            {/* Creator or admin can delete */}
                             {(canDeleteGlobal ||
-                              task.assigner?._id?.toString() === user?._id ||
-                              task.assignee?._id?.toString() === user?._id) && (
+                              (task.assigner as any)?._id?.toString() === user?._id) && (
                               <button
                                 onClick={() => handleDelete(task._id)}
                                 disabled={deletingId === task._id}

@@ -1,34 +1,18 @@
-// backend/models/Task.js
 const mongoose = require("mongoose");
 
 const attachmentSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    url: {
-      type: String,
-      required: true,
-    },
-    size: {
-      type: Number,
-      required: true,
-    },
+    name: { type: String, required: true, trim: true },
+    url: { type: String, required: true },
+    size: { type: Number, required: true },
     uploadedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
-    uploadedAt: {
-      type: Date,
-      default: Date.now,
-    },
+    uploadedAt: { type: Date, default: Date.now },
   },
-  {
-    timestamps: true,
-  },
+  { timestamps: true },
 );
 
 const TaskSchema = new mongoose.Schema(
@@ -50,14 +34,13 @@ const TaskSchema = new mongoose.Schema(
       trim: true,
       maxlength: [5000, "Description cannot exceed 5000 characters"],
     },
-    assignee: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      index: true,
-    },
+    // ── assignee removed ──────────────────────────────────────────────────────
+    // Employees create tasks for themselves only.
+    // Cross-employee assignment is handled by the AssignedTask system.
     assigner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      index: true, // ← indexed so employee "my tasks" queries are fast
     },
     startDate: { type: Date },
     endDate: { type: Date },
@@ -72,12 +55,7 @@ const TaskSchema = new mongoose.Schema(
       default: "To Do",
     },
     attachments: [attachmentSchema],
-    dependencies: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Task",
-      },
-    ],
+    dependencies: [{ type: mongoose.Schema.Types.ObjectId, ref: "Task" }],
   },
   {
     timestamps: true,
@@ -86,13 +64,11 @@ const TaskSchema = new mongoose.Schema(
   },
 );
 
-// Production-grade indexes
 TaskSchema.index({ project: 1, status: 1 });
-TaskSchema.index({ assignee: 1, status: 1 });
+TaskSchema.index({ assigner: 1, status: 1 });
 TaskSchema.index({ endDate: 1 });
 TaskSchema.index({ title: "text", description: "text" });
 
-// Date validation before save
 TaskSchema.pre("save", function (next) {
   if (this.startDate && this.endDate && this.endDate < this.startDate) {
     return next(new Error("End date must be after start date"));

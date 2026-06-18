@@ -1,12 +1,11 @@
-// src/components/Tasks/TaskForm.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { getTask, createTask, updateTask, getProjects, getUsers } from '../../api/client';
-import type { Project, User, Task } from '../types/index';
+import { getTask, createTask, updateTask, getProjects } from '../../api/client';
+import type { Project, Task } from '../types/index';
 import { Save, X, Upload, Trash2, AlertCircle, Download } from 'lucide-react';
 
-// ─── Toast Notification (production note: replace with react-hot-toast in real app) ──────────────────────────────────────────────────────
+// ─── Toast ────────────────────────────────────────────────────────────────────
 const notify = (message: string, type: 'success' | 'error' = 'success') => {
   const toast = document.createElement('div');
   toast.style.cssText = `
@@ -34,8 +33,12 @@ interface FormErrors {
 const validate = (formData: typeof INITIAL_FORM): FormErrors => {
   const errors: FormErrors = {};
   if (!formData.title.trim()) errors.title = 'Title is required';
-  if (!formData.project) errors.project = 'Project is required';
-  if (formData.startDate && formData.endDate && new Date(formData.endDate) < new Date(formData.startDate)) {
+  if (!formData.project)      errors.project = 'Project is required';
+  if (
+    formData.startDate &&
+    formData.endDate &&
+    new Date(formData.endDate) < new Date(formData.startDate)
+  ) {
     errors.endDate = 'End date must be after start date';
   }
   return errors;
@@ -43,26 +46,25 @@ const validate = (formData: typeof INITIAL_FORM): FormErrors => {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const INITIAL_FORM = {
-  title: '',
+  title:       '',
   description: '',
-  project: '',
-  assignee: '',
-  startDate: '',
-  endDate: '',
-  priority: 'Medium' as 'Low' | 'Medium' | 'High',
-  status: 'To Do' as 'To Do' | 'In Progress' | 'Review' | 'Done',
+  project:     '',
+  startDate:   '',
+  endDate:     '',
+  priority:    'Medium' as 'Low' | 'Medium' | 'High',
+  status:      'To Do'  as 'To Do' | 'In Progress' | 'Review' | 'Done',
+  // ── assignee removed — employees create tasks for themselves only ──────────
 };
 
 const ALLOWED_TYPES = [
-  'image/jpeg', 'image/png', 'image/gif',
-  'application/pdf',
+  'image/jpeg', 'image/png', 'image/gif', 'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-const MAX_FILES = 10;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILES     = 10;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const extractProjects = (res: any): Project[] => {
@@ -74,62 +76,51 @@ const extractProjects = (res: any): Project[] => {
   return [];
 };
 
-const extractUsers = (res: any): User[] => {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (Array.isArray(res.data?.users)) return res.data.users;
-  if (Array.isArray(res.data)) return res.data;
-  return [];
-};
-
 const formatFileSize = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024)         return `${bytes} B`;
+  if (bytes < 1024 * 1024)  return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export const TaskForm: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const { id }       = useParams<{ id: string }>();
+  const navigate     = useNavigate();
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [newAttachments, setNewAttachments] = useState<File[]>([]);
-  const [existingAttachments, setExistingAttachments] = useState<any[]>([]); // Task attachment objects
+  const [projects, setProjects]                     = useState<Project[]>([]);
+  const [loading, setLoading]                       = useState(false);
+  const [initialLoading, setInitialLoading]         = useState(true);
+  const [newAttachments, setNewAttachments]         = useState<File[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<any[]>([]);
   const [removedAttachmentIds, setRemovedAttachmentIds] = useState<string[]>([]);
-  const [formErrors, setFormErrors] = useState<FormErrors>({});
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const [formData, setFormData] = useState(INITIAL_FORM);
+  const [formErrors, setFormErrors]                 = useState<FormErrors>({});
+  const [touched, setTouched]                       = useState<Record<string, boolean>>({});
+  const [formData, setFormData]                     = useState(INITIAL_FORM);
 
-  // ── Load form data ──────────────────────────────────────────────────────────
+  // ── Load ───────────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
     setInitialLoading(true);
     try {
-      const [projectsRes, usersRes] = await Promise.all([getProjects(), getUsers()]);
+      const projectsRes = await getProjects();
       setProjects(extractProjects(projectsRes));
-      setUsers(extractUsers(usersRes));
 
       if (id) {
         const taskRes = await getTask(id);
         const task: Task = taskRes?.data ?? taskRes;
         setFormData({
-          title: task.title || '',
+          title:       task.title       || '',
           description: task.description || '',
-          project: typeof task.project === 'string' ? task.project : task.project?._id || '',
-          assignee: typeof task.assignee === 'string' ? task.assignee : task.assignee?._id || '',
-          startDate: task.startDate ? new Date(task.startDate).toISOString().split('T')[0] : '',
-          endDate: task.endDate ? new Date(task.endDate).toISOString().split('T')[0] : '',
-          priority: task.priority || 'Medium',
-          status: task.status || 'To Do',
+          project:     typeof task.project === 'string' ? task.project : task.project?._id || '',
+          startDate:   task.startDate ? new Date(task.startDate).toISOString().split('T')[0] : '',
+          endDate:     task.endDate   ? new Date(task.endDate).toISOString().split('T')[0]   : '',
+          priority:    task.priority  || 'Medium',
+          status:      task.status    || 'To Do',
         });
         setExistingAttachments(task.attachments || []);
         setNewAttachments([]);
         setRemovedAttachmentIds([]);
       }
-    } catch (err) {
+    } catch {
       notify('Failed to load form data', 'error');
     } finally {
       setInitialLoading(false);
@@ -138,13 +129,14 @@ export const TaskForm: React.FC = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // ── Field helpers ───────────────────────────────────────────────────────────
-  const setField = <K extends keyof typeof INITIAL_FORM>(key: K, value: typeof INITIAL_FORM[K]) => {
+  // ── Field helpers ──────────────────────────────────────────────────────────
+  const setField = <K extends keyof typeof INITIAL_FORM>(
+    key: K,
+    value: typeof INITIAL_FORM[K]
+  ) => {
     const updated = { ...formData, [key]: value };
     setFormData(updated);
-    if (touched[key]) {
-      setFormErrors(validate(updated));
-    }
+    if (touched[key]) setFormErrors(validate(updated));
   };
 
   const handleBlur = (key: string) => {
@@ -152,71 +144,52 @@ export const TaskForm: React.FC = () => {
     setFormErrors(validate(formData));
   };
 
-  // ── Existing attachment removal ─────────────────────────────────────────────
+  // ── Attachments ────────────────────────────────────────────────────────────
   const removeExistingAttachment = (attachmentId: string) => {
     setExistingAttachments(prev => prev.filter(a => a._id !== attachmentId));
     setRemovedAttachmentIds(prev => [...prev, attachmentId]);
   };
 
-  // ── File handling ───────────────────────────────────────────────────────────
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
 
     const invalidType = files.find(f => !ALLOWED_TYPES.includes(f.type));
-    if (invalidType) {
-      notify(`"${invalidType.name}" has an unsupported file type`, 'error');
-      e.target.value = '';
-      return;
-    }
+    if (invalidType) { notify(`"${invalidType.name}" has an unsupported file type`, 'error'); e.target.value = ''; return; }
 
     const oversized = files.find(f => f.size > MAX_FILE_SIZE);
-    if (oversized) {
-      notify(`"${oversized.name}" exceeds the 10 MB limit`, 'error');
-      e.target.value = '';
-      return;
-    }
+    if (oversized) { notify(`"${oversized.name}" exceeds the 10 MB limit`, 'error'); e.target.value = ''; return; }
 
     const combined = [...newAttachments, ...files];
-    if (combined.length > MAX_FILES) {
-      notify(`You can attach at most ${MAX_FILES} files`, 'error');
-      e.target.value = '';
-      return;
-    }
+    if (combined.length > MAX_FILES) { notify(`You can attach at most ${MAX_FILES} files`, 'error'); e.target.value = ''; return; }
 
     setNewAttachments(combined);
-    e.target.value = ''; // reset input
+    e.target.value = '';
   };
 
   const removeNewAttachment = (index: number) =>
     setNewAttachments(prev => prev.filter((_, i) => i !== index));
 
-  // ── Submit ──────────────────────────────────────────────────────────────────
+  // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // Mark all fields as touched
     setTouched({ title: true, project: true, endDate: true });
     const errors = validate(formData);
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
     setLoading(true);
-
     const data = new FormData();
-    data.append('title', formData.title.trim());
+    data.append('title',       formData.title.trim());
     data.append('description', formData.description.trim());
-    data.append('project', formData.project);
-    if (formData.assignee) data.append('assignee', formData.assignee);
+    data.append('project',     formData.project);
     if (formData.startDate) data.append('startDate', formData.startDate);
-    if (formData.endDate) data.append('endDate', formData.endDate);
+    if (formData.endDate)   data.append('endDate',   formData.endDate);
     data.append('priority', formData.priority);
-    data.append('status', formData.status);
+    data.append('status',   formData.status);
+    // ── No assignee field ──────────────────────────────────────────────────
 
-    // New files
     newAttachments.forEach(file => data.append('attachments', file));
-
-    // Removed existing attachments (only for updates)
     if (id && removedAttachmentIds.length > 0) {
       data.append('removedAttachments', JSON.stringify(removedAttachmentIds));
     }
@@ -231,17 +204,13 @@ export const TaskForm: React.FC = () => {
       }
       navigate('/tasks');
     } catch (err: any) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.response?.data?.msg ||
-        'Failed to save task';
-      notify(msg, 'error');
+      notify(err?.response?.data?.message || err?.response?.data?.msg || 'Failed to save task', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen text-zinc-400">
@@ -301,7 +270,6 @@ export const TaskForm: React.FC = () => {
                 onBlur={() => handleBlur('title')}
                 className={`w-full px-6 py-5 bg-zinc-800 border rounded-3xl outline-none text-white focus:border-violet-500 transition-colors ${formErrors.title && touched.title ? 'input-error' : 'border-zinc-700'}`}
                 placeholder="Enter task title..."
-                aria-invalid={!!formErrors.title}
               />
               {formErrors.title && touched.title && (
                 <p className="field-error"><AlertCircle size={12} />{formErrors.title}</p>
@@ -320,39 +288,23 @@ export const TaskForm: React.FC = () => {
               />
             </div>
 
-            {/* Project + Assignee */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm text-zinc-400 mb-2">Project *</label>
-                <select
-                  value={formData.project}
-                  onChange={e => setField('project', e.target.value)}
-                  onBlur={() => handleBlur('project')}
-                  className={`w-full px-6 py-5 bg-zinc-800 border rounded-3xl outline-none text-white focus:border-violet-500 transition-colors ${formErrors.project && touched.project ? 'input-error' : 'border-zinc-700'}`}
-                >
-                  <option value="">Select a project...</option>
-                  {projects.map(p => (
-                    <option key={p._id} value={p._id}>{p.name}</option>
-                  ))}
-                </select>
-                {formErrors.project && touched.project && (
-                  <p className="field-error"><AlertCircle size={12} />{formErrors.project}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm text-zinc-400 mb-2">Assignee</label>
-                <select
-                  value={formData.assignee}
-                  onChange={e => setField('assignee', e.target.value)}
-                  className="w-full px-6 py-5 bg-zinc-800 border border-zinc-700 focus:border-violet-500 rounded-3xl outline-none text-white transition-colors"
-                >
-                  <option value="">Unassigned</option>
-                  {users.map(u => (
-                    <option key={u._id} value={u._id}>{u.name}</option>
-                  ))}
-                </select>
-              </div>
+            {/* Project — full width since Assignee is gone */}
+            <div>
+              <label className="block text-sm text-zinc-400 mb-2">Project *</label>
+              <select
+                value={formData.project}
+                onChange={e => setField('project', e.target.value)}
+                onBlur={() => handleBlur('project')}
+                className={`w-full px-6 py-5 bg-zinc-800 border rounded-3xl outline-none text-white focus:border-violet-500 transition-colors ${formErrors.project && touched.project ? 'input-error' : 'border-zinc-700'}`}
+              >
+                <option value="">Select a project...</option>
+                {projects.map(p => (
+                  <option key={p._id} value={p._id}>{p.name}</option>
+                ))}
+              </select>
+              {formErrors.project && touched.project && (
+                <p className="field-error"><AlertCircle size={12} />{formErrors.project}</p>
+              )}
             </div>
 
             {/* Dates */}
@@ -411,7 +363,7 @@ export const TaskForm: React.FC = () => {
               </div>
             </div>
 
-            {/* Attachments Section */}
+            {/* Attachments */}
             <div>
               <label className="block text-sm text-zinc-400 mb-2 flex items-center gap-2">
                 <Upload size={16} /> Attachments
@@ -420,7 +372,6 @@ export const TaskForm: React.FC = () => {
                 </span>
               </label>
 
-              {/* Existing Attachments (edit mode only) */}
               {id && existingAttachments.length > 0 && (
                 <div className="mb-6">
                   <p className="text-xs text-zinc-500 mb-3">CURRENT ATTACHMENTS</p>
@@ -432,9 +383,7 @@ export const TaskForm: React.FC = () => {
                         animate={{ opacity: 1, x: 0 }}
                         className="flex justify-between items-center bg-zinc-800 px-5 py-3 rounded-2xl text-sm border border-zinc-700"
                       >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <span className="truncate text-white font-medium">{att.name}</span>
-                        </div>
+                        <span className="truncate text-white font-medium flex-1">{att.name}</span>
                         <div className="flex items-center gap-6">
                           <a
                             href={att.url}
@@ -448,7 +397,6 @@ export const TaskForm: React.FC = () => {
                             type="button"
                             onClick={() => removeExistingAttachment(att._id)}
                             className="text-red-400 hover:text-red-300 transition-colors"
-                            aria-label={`Remove ${att.name}`}
                           >
                             <Trash2 size={18} />
                           </button>
@@ -459,7 +407,6 @@ export const TaskForm: React.FC = () => {
                 </div>
               )}
 
-              {/* Upload new attachments */}
               <label className="flex flex-col items-center justify-center w-full px-6 py-8 bg-zinc-800 border border-dashed border-zinc-700 hover:border-violet-500 rounded-3xl text-zinc-400 hover:text-violet-400 cursor-pointer transition-colors">
                 <Upload size={24} className="mb-2" />
                 <span className="text-sm font-medium">Click to upload or drag &amp; drop new files</span>
@@ -472,7 +419,6 @@ export const TaskForm: React.FC = () => {
                 />
               </label>
 
-              {/* New attachments preview */}
               {newAttachments.length > 0 && (
                 <div className="mt-4 space-y-3">
                   <p className="text-xs text-zinc-500 mb-3">NEW ATTACHMENTS TO BE ADDED</p>
@@ -491,7 +437,6 @@ export const TaskForm: React.FC = () => {
                         type="button"
                         onClick={() => removeNewAttachment(i)}
                         className="text-red-400 hover:text-red-300 ml-4 shrink-0 transition-colors"
-                        aria-label={`Remove ${file.name}`}
                       >
                         <Trash2 size={18} />
                       </button>
@@ -509,15 +454,9 @@ export const TaskForm: React.FC = () => {
                 className="flex-1 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed py-5 rounded-3xl font-semibold text-white flex items-center justify-center gap-3 transition-colors"
               >
                 {loading ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Saving...
-                  </>
+                  <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving...</>
                 ) : (
-                  <>
-                    <Save size={20} />
-                    {id ? 'Update Task' : 'Create Task'}
-                  </>
+                  <><Save size={20} />{id ? 'Update Task' : 'Create Task'}</>
                 )}
               </button>
               <button
