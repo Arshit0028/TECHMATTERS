@@ -20,7 +20,8 @@ const STATUS_META: Record<string, { color: string; bg: string; border: string; l
   Paid:     { color: '#60a5fa', bg: 'rgba(96,165,250,0.10)',  border: 'rgba(96,165,250,0.25)',  label: 'Paid'     },
 };
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_URL    = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const SERVER_URL = API_URL.replace(/\/api\/?$/, '');
 
 export const ReimbursementDetail: React.FC = () => {
   const { id }    = useParams();
@@ -67,8 +68,11 @@ export const ReimbursementDetail: React.FC = () => {
     }
   };
 
+  // Handles both:
+  //   New records  — full Cloudinary URL: https://res.cloudinary.com/...  → used directly
+  //   Legacy records — relative path: uploads/resumes/...                → prepend SERVER_URL
   const openReceipt = (url: string) => {
-    const fullUrl = `${API_URL}/${url}`;
+    const fullUrl = url.startsWith('http') ? url : `${SERVER_URL}/${url}`;
     window.open(fullUrl, '_blank', 'noopener,noreferrer');
   };
 
