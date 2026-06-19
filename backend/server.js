@@ -60,6 +60,12 @@ app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 /* ── Logging ──────────────────────────────────────────────────────────────── */
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
+/* ── Keep-alive / uptime ping ─────────────────────────────────────────────── */
+// Lightweight, unauthenticated, NOT rate-limited (declared before the limiters).
+// Point UptimeRobot / cron-job.org at https://techmatters.onrender.com/health
+// every ~10 min to prevent Render free-tier cold starts.
+app.get("/health", (req, res) => res.status(200).send("ok"));
+
 /* ── Static uploads ───────────────────────────────────────────────────────── */
 app.use("/api/uploads", express.static("uploads"));
 
