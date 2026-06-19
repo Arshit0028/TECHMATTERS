@@ -104,6 +104,101 @@ async function pruneDeletedTasks(reportId) {
   return false;
 }
 
+// ── Month-scoping: which calendar month does a date fall in? ──────────────────
+// Uses UTC so 'YYYY-MM-DD' dates (stored as UTC midnight) bucket deterministically.
+const monthKeyOf = (d) => {
+  if (!d) return null;
+  const dt = d instanceof Date ? d : new Date(d);
+  if (isNaN(dt.getTime())) return null;
+  return dt.getUTCFullYear() * 12 + dt.getUTCMonth();
+};
+
+// Decide whether a linked Task (by its dates) belongs to a report's month.
+// Priority: scheduled window (start/end/due). If a task carries NO scheduling
+// date at all, fall back to its creation month ("created in May" → May report).
+// If nothing is datable, keep it (never hide on a guess).
+function taskBelongsToMonth(taskDates, subdocDueDate, month, year) {
+  const target = year * 12 + (month - 1);
+
+  const startK = monthKeyOf(taskDates.startDate);
+  const endK = monthKeyOf(
+    taskDates.endDate ?? taskDates.dueDate ?? subdocDueDate,
+  );
+  const dueK = monthKeyOf(taskDates.dueDate ?? subdocDueDate);
+  const createdK = monthKeyOf(taskDates.createdAt);
+
+  // No scheduling dates → use creation month as the anchor.
+  if (startK === null && endK === null && dueK === null) {
+    if (createdK === null) return true; // truly undatable → keep
+    return createdK === target;
+  }
+
+  if (dueK === target) return true;
+  // Task active window covers the target month (handles single- and multi-month).
+  if (startK !== null && endK !== null) {
+    return startK <= target && endK >= target;
+  }
+  if (startK !== null) return startK === target;
+  if (endK !== null) return endK === target;
+  return false;
+}
+
+// ── Remove a DRAFT report's linked tasks that belong to a different month ─────
+// This is the cross-month "bleed" fix. The report-fill UI links the employee's
+// live Tasks into whatever month they open, so a long-lived Task created/active
+// in May reappears in June's draft. We scope a DRAFT report's linked tasks to
+// its own month using the Task's dates (creation month as fallback).
+//
+// Hard guarantees:
+//   • Only DRAFT reports are touched. Submitted / manager_reviewed / approved /
+//     rejected reports are authoritative snapshots and are never modified.
+//   • Self-added tasks (no taskRef) are always kept.
+//   • Tasks whose linked Task is missing are left for pruneDeletedTasks.
+//   • Undatable tasks are kept (never dropped on a guess).
+async function pruneCrossMonthTasks(reportId) {
+  const report = await MonthlyReport.findById(reportId);
+  if (!report || report.status !== "draft") return false;
+  if (!report.tasks || report.tasks.length === 0) return false;
+
+  const refIds = report.tasks
+    .filter((t) => t.taskRef)
+    .map((t) => t.taskRef.toString())
+    .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+  if (refIds.length === 0) return false; // nothing linked to scope
+
+  const liveTasks = await Task.find({ _id: { $in: refIds } }).select(
+    "startDate endDate dueDate createdAt",
+  );
+  const dateMap = new Map(liveTasks.map((t) => [t._id.toString(), t]));
+
+  const before = report.tasks.length;
+
+  report.tasks = report.tasks.filter((t) => {
+    if (!t.taskRef) return true; // self-added → always keep
+    const live = dateMap.get(t.taskRef.toString());
+    if (!live) return true; // missing Task → let pruneDeletedTasks handle it
+
+    return taskBelongsToMonth(
+      {
+        startDate: live.startDate,
+        endDate: live.endDate,
+        dueDate: live.dueDate,
+        createdAt: live.createdAt,
+      },
+      t.dueDate,
+      report.month,
+      report.year,
+    );
+  });
+
+  if (report.tasks.length !== before) {
+    await report.save();
+    return true;
+  }
+  return false;
+}
+
 // ── Normalize a populated report so the frontend keys tasks by the live
 // Task _id (taskRef._id) instead of the embedded subdoc _id. Self-added tasks
 // (no taskRef) keep their subdoc _id.
@@ -194,6 +289,7 @@ router.get("/mine", auth, async (req, res) => {
     }
 
     await pruneDeletedTasks(report._id);
+    await pruneCrossMonthTasks(report._id);
 
     const populated = await populate(MonthlyReport.findById(report._id));
     const obj = populated.toObject ? populated.toObject() : populated;
@@ -230,6 +326,7 @@ router.get("/team", auth, async (req, res) => {
 
     const reportDocs = await MonthlyReport.find(query).select("_id");
     await Promise.all(reportDocs.map((r) => pruneDeletedTasks(r._id)));
+    await Promise.all(reportDocs.map((r) => pruneCrossMonthTasks(r._id)));
 
     const reports = await populate(
       MonthlyReport.find(query).sort({ year: -1, month: -1 }),
@@ -305,6 +402,7 @@ router.patch("/:id/link-tasks", auth, async (req, res) => {
 router.get("/:id", auth, async (req, res) => {
   try {
     await pruneDeletedTasks(req.params.id);
+    await pruneCrossMonthTasks(req.params.id);
 
     const report = await populate(MonthlyReport.findById(req.params.id));
     if (!report) return res.status(404).json({ msg: "Report not found" });
@@ -549,6 +647,7 @@ router.post("/:id/submit", auth, async (req, res) => {
     }
 
     await pruneDeletedTasks(report._id);
+    await pruneCrossMonthTasks(report._id);
     const fresh = await MonthlyReport.findById(report._id);
 
     const incompleteWithoutNote = fresh.tasks.filter(

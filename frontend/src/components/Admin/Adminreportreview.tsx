@@ -7,11 +7,30 @@ import {
   Users, Receipt, AlertCircle, Clock, CheckCircle2,
   Send, Loader2, ArrowRight, BarChart2,
   Eye, Search, ChevronDown, Award, Zap, Download, Star,
-  Activity as ActivityIcon,
+  Activity as ActivityIcon, Sun, Moon,
 } from 'lucide-react';
 
 // ─── Shared sync channel — matches EmployeeMonthlyReport ─────────────────────
 const SYNC_CHANNEL = 'monthly-report-sync';
+
+// ─── Theme persistence ────────────────────────────────────────────────────────
+// Local, non-destructive theme scope for this view. Defaults to LIGHT.
+// On first load it mirrors any global theme already set on <html> (read-only —
+// it never writes to the document, so the rest of the app is untouched).
+const THEME_KEY = 'arr-theme';
+type Theme = 'light' | 'dark';
+const detectInitialTheme = (): Theme => {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+    const root = document.documentElement;
+    if (root.classList.contains('dark') || root.getAttribute('data-theme') === 'dark') return 'dark';
+    const global = localStorage.getItem('theme');
+    if (global === 'dark') return 'dark';
+  } catch { /* ignore */ }
+  return 'light';
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface TaskEntry {
@@ -94,14 +113,14 @@ const MONTHS = [
   'July','August','September','October','November','December',
 ];
 const PRIORITY_COLOR: Record<string, string> = {
-  Low: '#60a5fa', Medium: '#fbbf24', High: '#f87171',
+  Low: '#3b82f6', Medium: '#d97706', High: '#dc2626',
 };
 const STATUS_META: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  draft:            { label: 'Draft',        color: '#64748b', bg: 'rgba(100,116,139,0.1)',  border: 'rgba(100,116,139,0.2)'  },
-  submitted:        { label: 'Submitted',    color: '#60a5fa', bg: 'rgba(96,165,250,0.1)',   border: 'rgba(96,165,250,0.25)'  },
-  manager_reviewed: { label: 'Mgr Reviewed', color: '#fbbf24', bg: 'rgba(251,191,36,0.1)',   border: 'rgba(251,191,36,0.25)'  },
-  approved:         { label: 'Approved',     color: '#34d399', bg: 'rgba(52,211,153,0.1)',   border: 'rgba(52,211,153,0.25)'  },
-  rejected:         { label: 'Returned',     color: '#f87171', bg: 'rgba(248,113,113,0.1)',  border: 'rgba(248,113,113,0.25)' },
+  draft:            { label: 'Draft',        color: '#64748b', bg: 'rgba(100,116,139,0.12)', border: 'rgba(100,116,139,0.25)' },
+  submitted:        { label: 'Submitted',    color: '#2563eb', bg: 'rgba(37,99,235,0.12)',   border: 'rgba(37,99,235,0.28)'   },
+  manager_reviewed: { label: 'Mgr Reviewed', color: '#b45309', bg: 'rgba(217,119,6,0.12)',   border: 'rgba(217,119,6,0.28)'   },
+  approved:         { label: 'Approved',     color: '#059669', bg: 'rgba(5,150,105,0.12)',   border: 'rgba(5,150,105,0.28)'   },
+  rejected:         { label: 'Returned',     color: '#dc2626', bg: 'rgba(220,38,38,0.12)',   border: 'rgba(220,38,38,0.28)'   },
 };
 const AVATAR_GRADS = [
   'linear-gradient(135deg,#7c3aed,#6366f1)',
@@ -141,33 +160,20 @@ const empName  = (r: MonthlyReport): string => r.employee?.name?.trim()  || 'Unk
 const empEmail = (r: MonthlyReport): string => r.employee?.email?.trim() || '—';
 
 // ─── PDF: Individual Employee (Premium Landscape Layout) ─────────────────────
-//
-//  KEY FIXES vs original:
-//  1. Landscape A4 (297×210mm) — Notes column grows from ~8mm to ~80mm,
-//     eliminating the vertically-stacked character bug.
-//  2. "Rs." currency prefix — jsPDF Helvetica has no ₹ glyph; the original
-//     code was printing a replacement character (¹).
-//  3. Dates always rendered — fmtPDF() returns "Not set" for null/undefined,
-//     clearly distinguishing missing data from an intentional dash separator.
-//  4. Premium design — bordered KPI cards, refined section headers with
-//     accent bars, colour-coded priority/status badges.
-// ─────────────────────────────────────────────────────────────────────────────
 const downloadEmployeePDF = async (report: MonthlyReport) => {
   const { default: jsPDF }     = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
 
-  // ── Page setup: LANDSCAPE A4 = 297 × 210 mm ───────────────────────────────
   const doc = new jsPDF('landscape', 'mm', 'a4');
   const pw  = doc.internal.pageSize.getWidth();   // 297
   const ph  = doc.internal.pageSize.getHeight();  // 210
-  const ML  = 14;                                 // left margin
-  const MR  = 14;                                 // right margin
-  const CW  = pw - ML - MR;                       // 269 mm usable width
+  const ML  = 14;
+  const MR  = 14;
+  const CW  = pw - ML - MR;
 
   const monthName    = MONTHS[report.month - 1];
   const employeeName = empName(report);
 
-  // ── Palette ────────────────────────────────────────────────────────────────
   const C = {
     violet   : [79,  48, 191] as [number,number,number],
     violetMid: [109, 77, 226] as [number,number,number],
@@ -191,7 +197,6 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     white    : [255,255, 255] as [number,number,number],
   };
 
-  // ── Low-level helpers ──────────────────────────────────────────────────────
   const fill = (x: number, y: number, w: number, h: number, c: [number,number,number]) => {
     doc.setFillColor(...c); doc.rect(x, y, w, h, 'F');
   };
@@ -202,8 +207,6 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     doc.setDrawColor(...c); doc.setLineWidth(lw); doc.line(x1, y, x2, y);
   };
 
-  // ── Timezone-safe date formatter for PDF ───────────────────────────────────
-  //    Returns "Not set" so reviewers can distinguish missing vs intentional "—"
   const fmtPDF = (d?: string | null, fallback = 'Not set'): string => {
     if (!d) return fallback;
     const part  = d.includes('T') ? d.split('T')[0] : d;
@@ -215,10 +218,8 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     });
   };
 
-  // Currency: jsPDF Helvetica has no ₹ glyph — use "Rs." which is always safe.
   const money = (n: number) => `Rs. ${n.toLocaleString('en-IN')}`;
 
-  // ── Computed stats ─────────────────────────────────────────────────────────
   const tasks      = report.tasks || [];
   const tasksDone  = tasks.filter(t => taskIsDone(t)).length;
   const tasksTotal = tasks.length;
@@ -233,7 +234,6 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   const nmYear     = report.month === 12 ? report.year + 1 : report.year;
   const nmLabel    = `${MONTHS[nmMonth - 1]} ${nmYear}`;
 
-  // ── Shared table styles ────────────────────────────────────────────────────
   const thBase = {
     textColor  : C.white as [number,number,number],
     fontStyle  : 'bold' as const,
@@ -249,13 +249,12 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     overflow   : 'linebreak' as const,
   };
 
-  // ── Section heading helper ─────────────────────────────────────────────────
   let y = 18;
 
   const sectionHead = (label: string, accent: [number,number,number], subLabel = '') => {
     if (y > ph - 55) { doc.addPage(); y = 18; }
     fill(ML, y, CW, 9, accent);
-    fill(ML, y, 4, 9, C.slate900);            // dark inner left accent bar
+    fill(ML, y, 4, 9, C.slate900);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor(...C.white);
@@ -271,21 +270,14 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     y += 13;
   };
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  PAGE 1 — PREMIUM COVER HEADER
-  // ──────────────────────────────────────────────────────────────────────────
-
-  // Deep navy top band
+  // PAGE 1 — COVER HEADER
   fill(0, 0, pw, 68, C.slate900);
-  // Violet accent left bar
   fill(0, 0, 5, 68, C.violetMid);
-  // Subtle diagonal highlight (top-right corner)
   doc.setFillColor(255, 255, 255);
   doc.setGState(new (doc as any).GState({ opacity: 0.03 }));
   doc.triangle(pw - 90, 0, pw, 0, pw, 90, 'F');
   doc.setGState(new (doc as any).GState({ opacity: 1 }));
 
-  // Report type label
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(...C.violetLt);
@@ -294,19 +286,16 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   doc.setCharSpace(0);
   hRule(17, ML + 6, pw * 0.55, C.violetMid, 0.3);
 
-  // Employee name
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(26);
   doc.setTextColor(...C.white);
   doc.text(employeeName.toUpperCase(), ML + 6, 34);
 
-  // Email
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...C.slate400);
   doc.text(empEmail(report), ML + 6, 42);
 
-  // Period + manager
   const periodLine =
     `${monthName.toUpperCase()} ${report.year}` +
     (report.reportingManager?.name ? `   |   Manager: ${report.reportingManager.name}` : '');
@@ -314,14 +303,12 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   doc.setTextColor(...C.slate400);
   doc.text(periodLine, ML + 6, 50);
 
-  // Submission date (if present)
   if (report.submittedAt) {
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
     doc.text(`Submitted: ${fmtPDF(report.submittedAt)}`, ML + 6, 58);
   }
 
-  // ── Status badge (top-right) ───────────────────────────────────────────────
   const sm = STATUS_META[report.status] ?? STATUS_META.draft;
   const badgeW = 48;
   const badgeX = pw - MR - badgeW;
@@ -341,7 +328,6 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   doc.text(sm.label.toUpperCase(), badgeX + badgeW / 2, 16, { align: 'center' });
   doc.setCharSpace(0);
 
-  // Score badge
   if (report.status === 'approved' && typeof report.adminScore === 'number') {
     fill(badgeX, 22, badgeW, 11, C.slate700);
     doc.setFont('helvetica', 'bold');
@@ -350,24 +336,22 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     doc.text(`SCORE  ${report.adminScore} / 100`, badgeX + badgeW / 2, 29, { align: 'center' });
   }
 
-  // ── KPI cards row ──────────────────────────────────────────────────────────
   const kpis = [
-    { label: 'TASKS COMPLETED',  value: `${tasksDone} / ${tasksTotal}`,       sub: `${taskPct}% completion rate`,        accent: C.emerald   },
-    { label: 'ACTIVITIES',       value: `${actDone} / ${acts.length}`,         sub: 'completed this month',               accent: C.indigo    },
-    { label: 'NEXT MONTH PLAN',  value: `${nmPlan.length + nmActs.length}`,    sub: `items planned for ${nmLabel}`,       accent: C.violetMid },
-    { label: 'REIMBURSEMENTS',   value: money(reimbTotal),                     sub: `${reimbs.length} claim(s) submitted`, accent: C.orange    },
+    { label: 'TASKS COMPLETED',  value: `${tasksDone} / ${tasksTotal}`,       sub: `${taskPct}% completion rate`,         accent: C.emerald   },
+    { label: 'ACTIVITIES',       value: `${actDone} / ${acts.length}`,        sub: 'completed this month',                accent: C.indigo    },
+    { label: 'NEXT MONTH PLAN',  value: `${nmPlan.length + nmActs.length}`,   sub: `items planned for ${nmLabel}`,        accent: C.violetMid },
+    { label: 'REIMBURSEMENTS',   value: money(reimbTotal),                    sub: `${reimbs.length} claim(s) submitted`, accent: C.orange    },
   ];
-  const cardW  = (CW - 9) / kpis.length;          // 3mm gap × 3 spaces
+  const cardW  = (CW - 9) / kpis.length;
   const cardY  = 74;
   const cardH  = 38;
 
   kpis.forEach((k, i) => {
     const cx = ML + i * (cardW + 3);
-    fill(cx, cardY, cardW, cardH, C.slate100);     // card background
-    fill(cx, cardY, 3.5, cardH, k.accent);         // accent left strip
+    fill(cx, cardY, cardW, cardH, C.slate100);
+    fill(cx, cardY, 3.5, cardH, k.accent);
     strokeRect(cx, cardY, cardW, cardH, C.slate200);
 
-    // Label (all-caps monospace)
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.5);
     doc.setTextColor(...C.slate600);
@@ -375,13 +359,11 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     doc.text(k.label, cx + 9, cardY + 9);
     doc.setCharSpace(0);
 
-    // Main value
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(15);
     doc.setTextColor(...k.accent);
     doc.text(k.value, cx + 9, cardY + 23);
 
-    // Sub-label
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(...C.slate600);
@@ -391,9 +373,7 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
 
   y = cardY + cardH + 12;
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  PAGE 2+ — SECTION A: TASKS
-  // ──────────────────────────────────────────────────────────────────────────
+  // SECTION A: TASKS
   doc.addPage();
   y = 18;
 
@@ -403,33 +383,29 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     `${tasksDone} of ${tasksTotal} completed  (${taskPct}%)`,
   );
 
-  // Column widths must sum to CW = 269 mm
-  //  # 7 | Title 66 | Project 28 | AssignedBy 26 | Start 24 | End 24 | Status 22 | Result 20 | Notes auto
   const tCols = { 0: 7, 1: 66, 2: 28, 3: 26, 4: 24, 5: 24, 6: 22, 7: 20 };
-  const tNotesW = CW - Object.values(tCols).reduce((a, b) => a + b, 0); // ≈ 52mm
+  const tNotesW = CW - Object.values(tCols).reduce((a, b) => a + b, 0);
 
-// Resolve a date from the report task first, then fall back to the linked
-// Task document (taskRef) which is where the real start/end dates live.
-const ref = (task: TaskEntry): any =>
-  task.taskRef && typeof task.taskRef === 'object' ? task.taskRef : null;
+  const ref = (task: TaskEntry): any =>
+    task.taskRef && typeof task.taskRef === 'object' ? task.taskRef : null;
 
-const startOf = (task: TaskEntry): string | null | undefined =>
-  task.startDate ?? ref(task)?.startDate ?? null;
+  const startOf = (task: TaskEntry): string | null | undefined =>
+    task.startDate ?? ref(task)?.startDate ?? null;
 
-const endOf = (task: TaskEntry): string | null | undefined =>
-  task.endDate ?? ref(task)?.endDate ?? task.dueDate ?? ref(task)?.dueDate ?? null;
+  const endOf = (task: TaskEntry): string | null | undefined =>
+    task.endDate ?? ref(task)?.endDate ?? task.dueDate ?? ref(task)?.dueDate ?? null;
 
-const taskRows = tasks.map((task, i) => [
-  String(i + 1),
-  task.title || '—',
-  safeName(task.project),
-  safeName(task.assignedBy),
-  fmtPDF(startOf(task)),
-  fmtPDF(endOf(task)),
-  task.status || '—',
-  taskIsDone(task) ? 'Done' : 'Pending',
-  taskIsDone(task) ? (task.doneNote || '—') : (task.undoneNote || '—'),
-]);
+  const taskRows = tasks.map((task, i) => [
+    String(i + 1),
+    task.title || '—',
+    safeName(task.project),
+    safeName(task.assignedBy),
+    fmtPDF(startOf(task)),
+    fmtPDF(endOf(task)),
+    task.status || '—',
+    taskIsDone(task) ? 'Done' : 'Pending',
+    taskIsDone(task) ? (task.doneNote || '—') : (task.undoneNote || '—'),
+  ]);
 
   autoTable(doc, {
     startY    : y,
@@ -455,8 +431,6 @@ const taskRows = tasks.map((task, i) => [
     },
     didDrawCell: (data) => {
       if (data.section !== 'body') return;
-
-      // Result badge (col 7) — filled pill
       if (data.column.index === 7) {
         const val = String(data.cell.raw ?? '');
         const bg: [number,number,number] = val === 'Done' ? C.emerald : C.amberLt;
@@ -467,8 +441,6 @@ const taskRows = tasks.map((task, i) => [
         doc.setFont('helvetica', 'bold');
         doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1.2, { align: 'center' });
       }
-
-      // Live Status (col 6) — colour-coded text
       if (data.column.index === 6) {
         const val = String(data.cell.raw ?? '');
         const c: [number,number,number] =
@@ -484,16 +456,13 @@ const taskRows = tasks.map((task, i) => [
   });
   y = (doc as any).lastAutoTable.finalY + 14;
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  SECTION B: ACTIVITIES
-  // ──────────────────────────────────────────────────────────────────────────
+  // SECTION B: ACTIVITIES
   sectionHead(
     'B.   Activities This Month',
     C.indigo,
     `${actDone} of ${acts.length} completed`,
   );
 
-  // # 7 | Name 72 | Type 40 | Priority 22 | Start 26 | End 26 | Status 26 | Project auto
   const aCols = { 0: 7, 1: 72, 2: 40, 3: 22, 4: 26, 5: 26, 6: 26 };
   const aProjW = CW - Object.values(aCols).reduce((a, b) => a + b, 0);
 
@@ -531,8 +500,6 @@ const taskRows = tasks.map((task, i) => [
     },
     didDrawCell: (data) => {
       if (data.section !== 'body') return;
-
-      // Status badge (col 6)
       if (data.column.index === 6) {
         const val = String(data.cell.raw ?? '');
         const bg: [number,number,number] =
@@ -545,8 +512,6 @@ const taskRows = tasks.map((task, i) => [
         doc.setFont('helvetica', 'bold');
         doc.text(val, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 1.2, { align: 'center' });
       }
-
-      // Priority colour (col 3)
       if (data.column.index === 3) {
         const val = String(data.cell.raw ?? '');
         const c: [number,number,number] =
@@ -561,9 +526,7 @@ const taskRows = tasks.map((task, i) => [
   });
   y = (doc as any).lastAutoTable.finalY + 14;
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  SECTION C: NEXT MONTH PLAN
-  // ──────────────────────────────────────────────────────────────────────────
+  // SECTION C: NEXT MONTH PLAN
   if (y > ph - 55) { doc.addPage(); y = 18; }
 
   sectionHead(
@@ -572,7 +535,6 @@ const taskRows = tasks.map((task, i) => [
     `${nmPlan.length} task(s)  ·  ${nmActs.length} activity(ies)`,
   );
 
-  // C1 — Task plan
   if (nmPlan.length > 0) {
     if (y > ph - 50) { doc.addPage(); y = 18; }
     doc.setFont('helvetica', 'bold');
@@ -583,7 +545,6 @@ const taskRows = tasks.map((task, i) => [
     doc.setCharSpace(0);
     y += 5;
 
-    // # 7 | Title 66 | Project 30 | Assignee 28 | Priority 20 | Start 26 | End 26 | Notes auto
     const pCols = { 0: 7, 1: 66, 2: 30, 3: 28, 4: 20, 5: 26, 6: 26 };
     const pNotesW = CW - Object.values(pCols).reduce((a, b) => a + b, 0);
 
@@ -630,7 +591,6 @@ const taskRows = tasks.map((task, i) => [
     y = (doc as any).lastAutoTable.finalY + 10;
   }
 
-  // C2 — Activity plan
   if (nmActs.length > 0) {
     if (y > ph - 50) { doc.addPage(); y = 18; }
     doc.setFont('helvetica', 'bold');
@@ -695,9 +655,7 @@ const taskRows = tasks.map((task, i) => [
     y += 10;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  SECTION D: REIMBURSEMENTS
-  // ──────────────────────────────────────────────────────────────────────────
+  // SECTION D: REIMBURSEMENTS
   if (reimbs.length > 0) {
     if (y > ph - 55) { doc.addPage(); y = 18; }
     sectionHead(
@@ -706,7 +664,6 @@ const taskRows = tasks.map((task, i) => [
       `Total: ${money(reimbTotal)}   |   ${reimbs.length} claim(s)`,
     );
 
-    // # 8 | Title 150 | Date 36 | Amount 40 | Status auto
     const rCols = { 0: 8, 1: 150, 2: 36, 3: 40 };
     const rStatusW = CW - Object.values(rCols).reduce((a, b) => a + b, 0);
 
@@ -753,9 +710,7 @@ const taskRows = tasks.map((task, i) => [
     y = (doc as any).lastAutoTable.finalY + 14;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  SECTION E: REMARKS & NOTES
-  // ──────────────────────────────────────────────────────────────────────────
+  // SECTION E: REMARKS & NOTES
   const hasFeedback =
     report.managerRemarks    ||
     report.adminRemarks      ||
@@ -767,12 +722,12 @@ const taskRows = tasks.map((task, i) => [
     sectionHead('E.   Remarks & Notes', C.amber);
 
     const remarkRows: string[][] = [];
-    if (report.managerRemarks)             remarkRows.push(['Manager Remarks',   report.managerRemarks]);
-    if (report.adminRemarks)               remarkRows.push(['Admin Remarks',     report.adminRemarks]);
-    if (report.nextMonthFreeText)          remarkRows.push(['Next Month Notes',  report.nextMonthFreeText]);
-    if (report.lastMonthNote?.accomplishments) remarkRows.push(['Accomplishments', report.lastMonthNote.accomplishments]);
-    if (report.lastMonthNote?.challenges)      remarkRows.push(['Challenges',      report.lastMonthNote.challenges]);
-    if (report.lastMonthNote?.learnings)       remarkRows.push(['Learnings',       report.lastMonthNote.learnings]);
+    if (report.managerRemarks)                 remarkRows.push(['Manager Remarks',   report.managerRemarks]);
+    if (report.adminRemarks)                   remarkRows.push(['Admin Remarks',     report.adminRemarks]);
+    if (report.nextMonthFreeText)              remarkRows.push(['Next Month Notes',  report.nextMonthFreeText]);
+    if (report.lastMonthNote?.accomplishments) remarkRows.push(['Accomplishments',   report.lastMonthNote.accomplishments]);
+    if (report.lastMonthNote?.challenges)      remarkRows.push(['Challenges',        report.lastMonthNote.challenges]);
+    if (report.lastMonthNote?.learnings)       remarkRows.push(['Learnings',         report.lastMonthNote.learnings]);
 
     if (remarkRows.length) {
       autoTable(doc, {
@@ -790,9 +745,6 @@ const taskRows = tasks.map((task, i) => [
     }
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  REJECTION NOTE (if applicable)
-  // ──────────────────────────────────────────────────────────────────────────
   if (report.status === 'rejected' && report.rejectionNote) {
     if (y > ph - 40) { doc.addPage(); y = 18; }
     fill(ML, y, CW, 8, [185, 28, 28]);
@@ -811,9 +763,6 @@ const taskRows = tasks.map((task, i) => [
     y += Math.max(16, rLines.length * 5 + 6) + 10;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  SIGNATURE BLOCK (last page, only if space remains)
-  // ──────────────────────────────────────────────────────────────────────────
   const sigY = ph - 28;
   doc.setPage((doc as any).internal.getNumberOfPages());
   if (y < sigY - 10) {
@@ -827,9 +776,6 @@ const taskRows = tasks.map((task, i) => [
     doc.text('Reporting Manager Signature', pw / 2, sigY + 5);
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  FOOTER — stamped on every page
-  // ──────────────────────────────────────────────────────────────────────────
   const totalPages = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
@@ -890,9 +836,9 @@ const downloadPDF = async (reports: MonthlyReport[], month: number, year: number
 
 // ─── Pill ─────────────────────────────────────────────────────────────────────
 const Pill: React.FC<{ label: string; val: string | number; color: string }> = ({ label, val, color }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 12px', background: color + '0d', border: `1px solid ${color}22`, borderRadius: 10, minWidth: 56 }}>
-    <span style={{ fontSize: 16, fontWeight: 700, color, fontFamily: 'Syne,sans-serif', letterSpacing: '-0.03em' }}>{val}</span>
-    <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.3)', fontFamily: 'DM Mono,monospace', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 2 }}>{label}</span>
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '9px 14px', background: color + '14', border: `1px solid ${color}33`, borderRadius: 12, minWidth: 64 }}>
+    <span style={{ fontSize: 16, fontWeight: 700, color, fontFamily: 'Syne,sans-serif', letterSpacing: '-0.03em', lineHeight: 1 }}>{val}</span>
+    <span style={{ fontSize: 9.5, color: 'var(--text-3)', fontFamily: 'DM Mono,monospace', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 5 }}>{label}</span>
   </div>
 );
 
@@ -900,19 +846,19 @@ const Pill: React.FC<{ label: string; val: string | number; color: string }> = (
 const PS: React.FC<{
   icon: React.ReactNode; title: string; badge?: string | number;
   accent?: string; defaultOpen?: boolean; children: React.ReactNode;
-}> = ({ icon, title, badge, accent = '#a78bfa', defaultOpen = true, children }) => {
+}> = ({ icon, title, badge, accent = 'var(--accent)', defaultOpen = true, children }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={{ marginBottom: 8, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
-      <div onClick={() => setOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', cursor: 'pointer', userSelect: 'none' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 9.5, fontFamily: 'DM Mono,monospace', letterSpacing: '0.11em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.38)' }}>
+    <div style={{ marginBottom: 8, background: 'var(--surface-nested)', border: '1px solid var(--border-2)', borderRadius: 12, overflow: 'hidden' }}>
+      <div onClick={() => setOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', cursor: 'pointer', userSelect: 'none' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 9.5, fontFamily: 'DM Mono,monospace', letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
           <span style={{ color: accent, display: 'flex' }}>{icon}</span>
           {title}
           {badge !== undefined && (
-            <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 100, background: accent + '18', color: accent, fontFamily: 'DM Sans,sans-serif', letterSpacing: 0, fontWeight: 500 }}>{badge}</span>
+            <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 100, background: accent + '22', color: accent, fontFamily: 'DM Sans,sans-serif', letterSpacing: 0, fontWeight: 600 }}>{badge}</span>
           )}
         </span>
-        <span style={{ color: 'rgba(255,255,255,0.22)', display: 'flex', transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform 0.2s' }}>
+        <span style={{ color: 'var(--text-4)', display: 'flex', transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform 0.2s' }}>
           <ChevronDown size={13} />
         </span>
       </div>
@@ -955,13 +901,13 @@ const ReportDetail: React.FC<{
     }));
   }, [initialReport]);
 
-  const [tab,            setTab]            = useState<'overview' | 'tasks' | 'activities' | 'plan' | 'reimb'>('overview');
-  const [managerRemarks, setManagerRemarks] = useState(initialReport.managerRemarks || '');
-  const [adminRemarks,   setAdminRemarks]   = useState(initialReport.adminRemarks   || '');
-  const [adminScore,     setAdminScore]     = useState<number>(initialReport.adminScore ?? 0);
-  const [rejectionNote,  setRejectionNote]  = useState('');
-  const [saving,         setSaving]         = useState<string | null>(null);
-  const [error,          setError]          = useState('');
+  const [tab,            setTab]             = useState<'overview' | 'tasks' | 'activities' | 'plan' | 'reimb'>('overview');
+  const [managerRemarks, setManagerRemarks]  = useState(initialReport.managerRemarks || '');
+  const [adminRemarks,   setAdminRemarks]    = useState(initialReport.adminRemarks   || '');
+  const [adminScore,     setAdminScore]      = useState<number>(initialReport.adminScore ?? 0);
+  const [rejectionNote,  setRejectionNote]   = useState('');
+  const [saving,         setSaving]          = useState<string | null>(null);
+  const [error,          setError]           = useState('');
 
   const canManagerReview = isManager && report.status === 'submitted';
   const canAdminApprove  = isAdmin   && ['submitted', 'manager_reviewed'].includes(report.status);
@@ -1016,18 +962,17 @@ const ReportDetail: React.FC<{
         transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="dp-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ width: 44, height: 44, borderRadius: 12, background: AVATAR_GRADS[0], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
               {initials(empName(report))}
             </div>
             <div>
-              <div style={{ fontSize: 9, fontFamily: 'DM Mono,monospace', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(167,139,250,0.6)', marginBottom: 3 }}>
+              <div style={{ fontSize: 9, fontFamily: 'DM Mono,monospace', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent-text)', marginBottom: 3 }}>
                 Monthly Report · {MONTHS[report.month - 1]} {report.year}
               </div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>{empName(report)}</div>
-              <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.28)', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2 }}>{empName(report)}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>
                 {empEmail(report)}{report.reportingManager?.name ? ` · Mgr: ${report.reportingManager.name}` : ''}
               </div>
             </div>
@@ -1035,7 +980,7 @@ const ReportDetail: React.FC<{
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
               onClick={() => downloadEmployeePDF(report)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'rgba(251,146,60,0.12)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.3)', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'rgba(234,88,12,0.12)', color: '#ea580c', border: '1px solid rgba(234,88,12,0.32)', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
             >
               <Download size={14} /> PDF
             </button>
@@ -1043,67 +988,62 @@ const ReportDetail: React.FC<{
           </div>
         </div>
 
-        {/* Stats strip */}
-        <div style={{ display: 'flex', gap: 8, padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexWrap: 'wrap' }}>
-          <Pill label="Tasks"      val={loadingActivities ? '…' : `${tasksDone}/${tasksTotal}`} color={taskPct >= 70 ? '#34d399' : taskPct >= 40 ? '#fbbf24' : '#f87171'} />
-          <Pill label="Completion" val={loadingActivities ? '…' : `${taskPct}%`}                color={taskPct >= 70 ? '#34d399' : taskPct >= 40 ? '#fbbf24' : '#f87171'} />
-          <Pill label="Activities" val={loadingActivities ? '…' : `${actDone}/${acts.length}`}  color="#60a5fa" />
-          <Pill label="Plans"      val={(report.nextMonthPlan || []).length}                     color="#a78bfa" />
-          <Pill label="Next Acts"  val={nmActs.length}                                           color="#38bdf8" />
-          <Pill label="Expenses"   val={`₹${reimbTotal.toLocaleString('en-IN')}`}               color="#fb923c" />
+        <div style={{ display: 'flex', gap: 8, padding: '14px 16px', borderBottom: '1px solid var(--border-2)', flexWrap: 'wrap' }}>
+          <Pill label="Tasks"      val={loadingActivities ? '…' : `${tasksDone}/${tasksTotal}`} color={taskPct >= 70 ? '#059669' : taskPct >= 40 ? '#d97706' : '#dc2626'} />
+          <Pill label="Completion" val={loadingActivities ? '…' : `${taskPct}%`}                color={taskPct >= 70 ? '#059669' : taskPct >= 40 ? '#d97706' : '#dc2626'} />
+          <Pill label="Activities" val={loadingActivities ? '…' : `${actDone}/${acts.length}`}  color="#2563eb" />
+          <Pill label="Plans"      val={(report.nextMonthPlan || []).length}                     color="#7c3aed" />
+          <Pill label="Next Acts"  val={nmActs.length}                                           color="#0891b2" />
+          <Pill label="Expenses"   val={`₹${reimbTotal.toLocaleString('en-IN')}`}               color="#ea580c" />
           {report.status === 'approved' && typeof report.adminScore === 'number' && (
-            <Pill label="Score" val={`${report.adminScore}/100`} color="#34d399" />
+            <Pill label="Score" val={`${report.adminScore}/100`} color="#059669" />
           )}
         </div>
 
-        {/* Status bar */}
-        <div style={{ padding: '10px 16px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 12px', borderRadius: 100, fontSize: 11, fontWeight: 500, background: sm.bg, color: sm.color, border: `1px solid ${sm.border}` }}>
+        <div style={{ padding: '12px 16px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 12px', borderRadius: 100, fontSize: 11, fontWeight: 600, background: sm.bg, color: sm.color, border: `1px solid ${sm.border}` }}>
             {sm.label}
-            {report.submittedAt && <span style={{ opacity: 0.6, fontSize: 10 }}>· {fmt(report.submittedAt)}</span>}
+            {report.submittedAt && <span style={{ opacity: 0.7, fontSize: 10 }}>· {fmt(report.submittedAt)}</span>}
           </span>
           {loadingActivities && (
-            <span style={{ fontSize: 10, color: 'rgba(96,165,250,0.6)', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10, color: 'var(--accent-text)', display: 'flex', alignItems: 'center', gap: 4 }}>
               <Loader2 size={11} style={{ animation: 'dp-spin 0.7s linear infinite' }} /> Loading full data…
             </span>
           )}
         </div>
 
         {error && (
-          <div style={{ margin: '8px 16px 0', display: 'flex', gap: 8, background: 'rgba(248,113,113,0.07)', border: '1px solid rgba(248,113,113,0.18)', borderRadius: 10, padding: '9px 12px', color: '#fca5a5', fontSize: 12.5 }}>
+          <div style={{ margin: '8px 16px 0', display: 'flex', gap: 8, background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.22)', borderRadius: 10, padding: '9px 12px', color: '#dc2626', fontSize: 12.5 }}>
             <AlertCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />{error}
           </div>
         )}
 
-        {/* Tabs */}
         <div className="dp-tabs">
           {TABS.map(t => (
             <button key={t.key} className={`dp-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>{t.label}</button>
           ))}
         </div>
 
-        {/* Tab content */}
         <div className="dp-content">
           <AnimatePresence mode="wait">
 
-            {/* OVERVIEW */}
             {tab === 'overview' && (
               <motion.div key="ov" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 14, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, padding: '14px 16px' }}>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 14, background: 'var(--surface-nested)', border: '1px solid var(--border-2)', borderRadius: 14, padding: '14px 16px' }}>
                   <svg width={64} height={64} viewBox="0 0 64 64" style={{ flexShrink: 0 }}>
-                    <circle cx={32} cy={32} r={26} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={6} />
+                    <circle cx={32} cy={32} r={26} fill="none" stroke="var(--track)" strokeWidth={6} />
                     <circle cx={32} cy={32} r={26} fill="none"
-                      stroke={taskPct >= 70 ? '#34d399' : taskPct >= 40 ? '#fbbf24' : '#f87171'}
+                      stroke={taskPct >= 70 ? '#059669' : taskPct >= 40 ? '#d97706' : '#dc2626'}
                       strokeWidth={6} strokeLinecap="round"
                       strokeDasharray={`${2 * Math.PI * 26}`}
                       strokeDashoffset={`${2 * Math.PI * 26 * (1 - taskPct / 100)}`}
                       transform="rotate(-90 32 32)" style={{ transition: 'stroke-dashoffset 1s ease' }}
                     />
-                    <text x={32} y={37} textAnchor="middle" fill="#fff" fontSize={13} fontWeight={700} fontFamily="Syne,sans-serif">{taskPct}%</text>
+                    <text x={32} y={37} textAnchor="middle" style={{ fill: 'var(--text)' }} fontSize={13} fontWeight={700} fontFamily="Syne,sans-serif">{taskPct}%</text>
                   </svg>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.85)', marginBottom: 4 }}>Task Completion</div>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Task Completion</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
                       {loadingActivities ? 'Loading…' : `${tasksDone} of ${tasksTotal} tasks done`}
                       {acts.length > 0 && <><br />{actDone} of {acts.length} activities done</>}
                       {nmActs.length > 0 && <><br />{nmActs.length} activities planned for next month</>}
@@ -1111,82 +1051,81 @@ const ReportDetail: React.FC<{
                   </div>
                 </div>
 
-                <PS icon={<CheckSquare size={12} />} title="Task Summary" badge={`${tasksDone}/${tasksTotal}`} accent="#34d399">
+                <PS icon={<CheckSquare size={12} />} title="Task Summary" badge={`${tasksDone}/${tasksTotal}`} accent="#059669">
                   {loadingActivities ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', color: 'rgba(255,255,255,0.25)', fontSize: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', color: 'var(--text-4)', fontSize: 12 }}>
                       <Loader2 size={14} style={{ animation: 'dp-spin 0.7s linear infinite' }} /> Loading tasks…
                     </div>
                   ) : tasks.slice(0, 6).map(t => {
                     const done = taskIsDone(t);
                     return (
-                      <div key={t._id} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        <span style={{ color: done ? '#34d399' : 'rgba(255,255,255,0.2)', flexShrink: 0, marginTop: 2 }}>
-                          {done ? <CheckSquare size={13} /> : <Square size={13} />}
+                      <div key={t._id} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '8px 0', borderBottom: '1px solid var(--border-2)' }}>
+                        <span style={{ color: done ? '#059669' : 'var(--text-faint)', flexShrink: 0, marginTop: 1 }}>
+                          {done ? <CheckSquare size={14} /> : <Square size={14} />}
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12.5, color: done ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.82)', textDecoration: done ? 'line-through' : 'none' }}>{t.title}</div>
-                          {t.status && <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontFamily: 'DM Mono,monospace' }}>{t.status}</span>}
-                          {!done && t.undoneNote && <div style={{ fontSize: 11, color: 'rgba(248,113,113,0.6)', marginTop: 2, fontStyle: 'italic' }}>⚠ {t.undoneNote}</div>}
+                          <div style={{ fontSize: 12.5, color: done ? 'var(--text-3)' : 'var(--text-2)', textDecoration: done ? 'line-through' : 'none' }}>{t.title}</div>
+                          {t.status && <span style={{ fontSize: 10, color: 'var(--text-4)', fontFamily: 'DM Mono,monospace' }}>{t.status}</span>}
+                          {!done && t.undoneNote && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2, fontStyle: 'italic' }}>⚠ {t.undoneNote}</div>}
                         </div>
                       </div>
                     );
                   })}
-                  {tasks.length > 6 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginTop: 6, textAlign: 'center' }}>+{tasks.length - 6} more in Tasks tab</div>}
+                  {tasks.length > 6 && <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 8, textAlign: 'center' }}>+{tasks.length - 6} more in Tasks tab</div>}
                 </PS>
 
                 {(report.managerRemarks || report.adminRemarks) && (
-                  <PS icon={<MessageSquare size={12} />} title="Feedback" accent="#fbbf24" defaultOpen={false}>
+                  <PS icon={<MessageSquare size={12} />} title="Feedback" accent="#d97706" defaultOpen={false}>
                     {report.managerRemarks && (
                       <>
-                        <div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: 'rgba(251,191,36,0.5)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Manager</div>
-                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', lineHeight: 1.55, marginBottom: 8 }}>{report.managerRemarks}</div>
+                        <div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: '#b45309', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Manager</div>
+                        <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 8 }}>{report.managerRemarks}</div>
                       </>
                     )}
                     {report.adminRemarks && (
                       <>
-                        <div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: 'rgba(167,139,250,0.5)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Admin</div>
-                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', lineHeight: 1.55 }}>{report.adminRemarks}</div>
+                        <div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: 'var(--accent-text)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Admin</div>
+                        <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.55 }}>{report.adminRemarks}</div>
                       </>
                     )}
                   </PS>
                 )}
 
                 {report.lastMonthNote?.accomplishments && (
-                  <PS icon={<BarChart2 size={12} />} title="Last Month Notes" accent="#fbbf24" defaultOpen={false}>
-                    {report.lastMonthNote.accomplishments && (<><div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: 'rgba(251,191,36,0.5)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Accomplishments</div><div style={{ fontSize: 13, color: 'rgba(255,255,255,0.62)', lineHeight: 1.55, marginBottom: 10 }}>{report.lastMonthNote.accomplishments}</div></>)}
-                    {report.lastMonthNote.challenges && (<><div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: 'rgba(251,191,36,0.5)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Challenges</div><div style={{ fontSize: 13, color: 'rgba(255,255,255,0.62)', lineHeight: 1.55, marginBottom: 10 }}>{report.lastMonthNote.challenges}</div></>)}
-                    {report.lastMonthNote.learnings && (<><div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: 'rgba(251,191,36,0.5)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Learnings</div><div style={{ fontSize: 13, color: 'rgba(255,255,255,0.62)', lineHeight: 1.55 }}>{report.lastMonthNote.learnings}</div></>)}
+                  <PS icon={<BarChart2 size={12} />} title="Last Month Notes" accent="#d97706" defaultOpen={false}>
+                    {report.lastMonthNote.accomplishments && (<><div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: '#b45309', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Accomplishments</div><div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 10 }}>{report.lastMonthNote.accomplishments}</div></>)}
+                    {report.lastMonthNote.challenges && (<><div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: '#b45309', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Challenges</div><div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 10 }}>{report.lastMonthNote.challenges}</div></>)}
+                    {report.lastMonthNote.learnings && (<><div style={{ fontSize: 9.5, fontFamily: 'DM Mono,monospace', color: '#b45309', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Learnings</div><div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.55 }}>{report.lastMonthNote.learnings}</div></>)}
                   </PS>
                 )}
               </motion.div>
             )}
 
-            {/* TASKS */}
             {tab === 'tasks' && (
               <motion.div key="tasks" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                 {loadingActivities ? (
                   <div className="dp-empty"><Loader2 size={28} style={{ opacity: 0.4, animation: 'dp-spin 0.7s linear infinite' }} /><span>Loading tasks…</span></div>
                 ) : tasks.length === 0 ? (
-                  <div className="dp-empty"><Square size={28} style={{ opacity: 0.1 }} /><span>No tasks in this report</span></div>
+                  <div className="dp-empty"><Square size={28} style={{ opacity: 0.25 }} /><span>No tasks in this report</span></div>
                 ) : (
                   <>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 100, background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.2)', fontWeight: 500 }}>{tasksDone} Done</span>
-                      {tasksTotal - tasksDone > 0 && <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 100, background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.2)', fontWeight: 500 }}>{tasksTotal - tasksDone} Pending</span>}
+                      <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 100, background: 'rgba(5,150,105,0.12)', color: '#059669', border: '1px solid rgba(5,150,105,0.25)', fontWeight: 600 }}>{tasksDone} Done</span>
+                      {tasksTotal - tasksDone > 0 && <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 100, background: 'rgba(220,38,38,0.1)', color: '#dc2626', border: '1px solid rgba(220,38,38,0.25)', fontWeight: 600 }}>{tasksTotal - tasksDone} Pending</span>}
                     </div>
                     {tasks.map(task => {
                       const done = taskIsDone(task);
-                      const pColor = PRIORITY_COLOR[task.priority || ''] || '#94a3b8';
+                      const pColor = PRIORITY_COLOR[task.priority || ''] || 'var(--text-4)';
                       return (
                         <div key={task._id} className="dp-task">
-                          <span style={{ color: done ? '#34d399' : 'rgba(255,255,255,0.2)', flexShrink: 0, marginTop: 2 }}>
+                          <span style={{ color: done ? '#059669' : 'var(--text-faint)', flexShrink: 0, marginTop: 1 }}>
                             {done ? <CheckSquare size={15} /> : <Square size={15} />}
                           </span>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13.5, fontWeight: 500, color: done ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.85)', textDecoration: done ? 'line-through' : 'none' }}>
+                            <div style={{ fontSize: 13.5, fontWeight: 600, color: done ? 'var(--text-3)' : 'var(--text)', textDecoration: done ? 'line-through' : 'none' }}>
                               {task.title}
                             </div>
-                            <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.22)', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>
+                            <div style={{ fontSize: 10.5, color: 'var(--text-4)', fontFamily: 'DM Mono,monospace', marginTop: 3 }}>
                               {task.project?.name  && `${task.project.name} · `}
                               {task.assignedBy?.name && `By ${task.assignedBy.name} · `}
                               {task.priority && <span style={{ color: pColor }}>{task.priority}</span>}
@@ -1195,22 +1134,22 @@ const ReportDetail: React.FC<{
                               {task.dueDate   && ` · Due ${fmt(task.dueDate)}`}
                             </div>
                             {task.status && (
-                              <span style={{ display: 'inline-flex', marginTop: 4, fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 100, background: task.status === 'Done' ? 'rgba(52,211,153,0.12)' : task.status === 'In Progress' ? 'rgba(96,165,250,0.12)' : 'rgba(251,191,36,0.12)', color: task.status === 'Done' ? '#34d399' : task.status === 'In Progress' ? '#60a5fa' : '#fbbf24' }}>
+                              <span style={{ display: 'inline-flex', marginTop: 5, fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 100, background: task.status === 'Done' ? 'rgba(5,150,105,0.12)' : task.status === 'In Progress' ? 'rgba(37,99,235,0.12)' : 'rgba(217,119,6,0.12)', color: task.status === 'Done' ? '#059669' : task.status === 'In Progress' ? '#2563eb' : '#b45309' }}>
                                 {task.status}
                               </span>
                             )}
                             {done && task.doneNote && (
-                              <div style={{ marginTop: 5, fontSize: 12, color: 'rgba(52,211,153,0.7)', background: 'rgba(52,211,153,0.05)', border: '1px solid rgba(52,211,153,0.12)', borderRadius: 7, padding: '5px 9px' }}>
+                              <div style={{ marginTop: 6, fontSize: 12, color: '#047857', background: 'rgba(5,150,105,0.07)', border: '1px solid rgba(5,150,105,0.16)', borderRadius: 7, padding: '6px 9px' }}>
                                 ✅ {task.doneNote}
                               </div>
                             )}
                             {!done && task.undoneNote && (
-                              <div style={{ marginTop: 5, fontSize: 12, color: '#fca5a5', background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.12)', borderRadius: 7, padding: '5px 9px' }}>
+                              <div style={{ marginTop: 6, fontSize: 12, color: '#dc2626', background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.16)', borderRadius: 7, padding: '6px 9px' }}>
                                 ⚠️ {task.undoneNote}
                               </div>
                             )}
                             {!done && !task.undoneNote && (
-                              <div style={{ marginTop: 4, fontSize: 11, color: 'rgba(248,113,113,0.4)', fontStyle: 'italic' }}>No explanation provided</div>
+                              <div style={{ marginTop: 5, fontSize: 11, color: 'var(--text-4)', fontStyle: 'italic' }}>No explanation provided</div>
                             )}
                           </div>
                         </div>
@@ -1221,36 +1160,35 @@ const ReportDetail: React.FC<{
               </motion.div>
             )}
 
-            {/* ACTIVITIES */}
             {tab === 'activities' && (
               <motion.div key="act" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                 {loadingActivities ? (
                   <div className="dp-empty"><Loader2 size={28} style={{ opacity: 0.4, animation: 'dp-spin 0.7s linear infinite' }} /><span>Loading activities…</span></div>
                 ) : acts.length === 0 ? (
-                  <div className="dp-empty"><ActivityIcon size={28} style={{ opacity: 0.1 }} /><span>No activities</span></div>
+                  <div className="dp-empty"><ActivityIcon size={28} style={{ opacity: 0.25 }} /><span>No activities</span></div>
                 ) : (
                   <>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
                       {(['Completed', 'In Progress', 'Pending'] as const).map(s => {
                         const cnt = acts.filter(a => a.status === s).length;
-                        const c   = s === 'Completed' ? '#34d399' : s === 'In Progress' ? '#60a5fa' : '#fbbf24';
-                        return cnt > 0 ? <span key={s} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 100, background: c + '14', color: c, border: `1px solid ${c}22`, fontWeight: 500 }}>{cnt} {s}</span> : null;
+                        const c   = s === 'Completed' ? '#059669' : s === 'In Progress' ? '#2563eb' : '#b45309';
+                        return cnt > 0 ? <span key={s} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 100, background: c + '1f', color: c, border: `1px solid ${c}33`, fontWeight: 600 }}>{cnt} {s}</span> : null;
                       })}
                     </div>
                     {acts.map(a => {
-                      const sc = a.status === 'Completed' ? '#34d399' : a.status === 'In Progress' ? '#60a5fa' : '#fbbf24';
-                      const sb = a.status === 'Completed' ? 'rgba(52,211,153,0.1)' : a.status === 'In Progress' ? 'rgba(96,165,250,0.1)' : 'rgba(251,191,36,0.1)';
-                      const pColor = PRIORITY_COLOR[a.priority] || '#94a3b8';
+                      const sc = a.status === 'Completed' ? '#059669' : a.status === 'In Progress' ? '#2563eb' : '#b45309';
+                      const sb = a.status === 'Completed' ? 'rgba(5,150,105,0.12)' : a.status === 'In Progress' ? 'rgba(37,99,235,0.12)' : 'rgba(217,119,6,0.12)';
+                      const pColor = PRIORITY_COLOR[a.priority] || 'var(--text-4)';
                       return (
                         <div key={a._id} className="dp-task">
-                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: pColor, flexShrink: 0, marginTop: 6 }} />
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: pColor, flexShrink: 0, marginTop: 6 }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                              <span style={{ fontSize: 13.5, fontWeight: 500, color: 'rgba(255,255,255,0.82)', flex: 1 }}>{a.name}</span>
-                              <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 100, background: sb, color: sc, fontWeight: 500, whiteSpace: 'nowrap' }}>{a.status}</span>
+                              <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{a.name}</span>
+                              <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 100, background: sb, color: sc, fontWeight: 600, whiteSpace: 'nowrap' }}>{a.status}</span>
                             </div>
-                            {a.description && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 3 }}>{a.description}</div>}
-                            <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.22)', fontFamily: 'DM Mono,monospace' }}>
+                            {a.description && <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 3 }}>{a.description}</div>}
+                            <div style={{ fontSize: 10.5, color: 'var(--text-4)', fontFamily: 'DM Mono,monospace' }}>
                               {a.project?.name && `${a.project.name} · `}
                               {a.task?.title   && `${a.task.title} · `}
                               {a.activityType}
@@ -1266,79 +1204,77 @@ const ReportDetail: React.FC<{
               </motion.div>
             )}
 
-            {/* PLAN */}
             {tab === 'plan' && (
               <motion.div key="plan" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                 {(report.nextMonthPlan || []).length > 0 && (
-                  <PS icon={<CheckSquare size={12} />} title="Task Plan" badge={(report.nextMonthPlan || []).length} accent="#a78bfa" defaultOpen>
+                  <PS icon={<CheckSquare size={12} />} title="Task Plan" badge={(report.nextMonthPlan || []).length} accent="#7c3aed" defaultOpen>
                     {(report.nextMonthPlan || []).map((item, i) => (
-                      <div key={i} style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '10px 12px', marginBottom: 7 }}>
+                      <div key={i} style={{ background: 'var(--surface-nested)', border: '1px solid var(--border-2)', borderRadius: 10, padding: '11px 12px', marginBottom: 7 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: item.notes ? 5 : 0 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: PRIORITY_COLOR[item.priority] || '#94a3b8', flexShrink: 0, display: 'inline-block' }} />
-                          <span style={{ fontSize: 13.5, fontWeight: 500, color: 'rgba(255,255,255,0.82)', flex: 1 }}>{item.title}</span>
-                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: (PRIORITY_COLOR[item.priority] || '#94a3b8') + '18', color: PRIORITY_COLOR[item.priority] || '#94a3b8', fontWeight: 500 }}>{item.priority}</span>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: PRIORITY_COLOR[item.priority] || 'var(--text-4)', flexShrink: 0, display: 'inline-block' }} />
+                          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{item.title}</span>
+                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: (PRIORITY_COLOR[item.priority] || '#94a3b8') + '22', color: PRIORITY_COLOR[item.priority] || 'var(--text-3)', fontWeight: 600 }}>{item.priority}</span>
                         </div>
-                        <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.2)', fontFamily: 'DM Mono,monospace', paddingLeft: 14, marginBottom: item.notes ? 4 : 0 }}>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-4)', fontFamily: 'DM Mono,monospace', paddingLeft: 15, marginBottom: item.notes ? 4 : 0 }}>
                           {item.projectName  && `${item.projectName}`}
                           {item.assigneeName && ` · ${item.assigneeName}`}
                           {item.activityType && ` · ${item.activityType}`}
                           {item.startDate    && ` · ${fmt(item.startDate)}`}
                           {item.endDate      && ` → ${fmt(item.endDate)}`}
                         </div>
-                        {item.notes && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)', paddingLeft: 14, lineHeight: 1.5 }}>{item.notes}</div>}
+                        {item.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', paddingLeft: 15, lineHeight: 1.5 }}>{item.notes}</div>}
                       </div>
                     ))}
                   </PS>
                 )}
                 {nmActs.length > 0 && (
-                  <PS icon={<ActivityIcon size={12} />} title="Activity Plan" badge={nmActs.length} accent="#38bdf8" defaultOpen>
+                  <PS icon={<ActivityIcon size={12} />} title="Activity Plan" badge={nmActs.length} accent="#0891b2" defaultOpen>
                     {nmActs.map((a, i) => (
-                      <div key={i} style={{ background: 'rgba(56,189,248,0.04)', border: '1px solid rgba(56,189,248,0.1)', borderRadius: 10, padding: '10px 12px', marginBottom: 7 }}>
+                      <div key={i} style={{ background: 'var(--surface-nested)', border: '1px solid var(--border-2)', borderRadius: 10, padding: '11px 12px', marginBottom: 7 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: PRIORITY_COLOR[a.priority] || '#94a3b8', flexShrink: 0, display: 'inline-block' }} />
-                          <span style={{ fontSize: 13.5, fontWeight: 500, color: 'rgba(255,255,255,0.82)', flex: 1 }}>{a.name}</span>
-                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: (PRIORITY_COLOR[a.priority] || '#94a3b8') + '18', color: PRIORITY_COLOR[a.priority] || '#94a3b8', fontWeight: 500 }}>{a.priority}</span>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: PRIORITY_COLOR[a.priority] || 'var(--text-4)', flexShrink: 0, display: 'inline-block' }} />
+                          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{a.name}</span>
+                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: (PRIORITY_COLOR[a.priority] || '#94a3b8') + '22', color: PRIORITY_COLOR[a.priority] || 'var(--text-3)', fontWeight: 600 }}>{a.priority}</span>
                         </div>
-                        <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.2)', fontFamily: 'DM Mono,monospace', paddingLeft: 14, marginBottom: a.notes ? 4 : 0 }}>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-4)', fontFamily: 'DM Mono,monospace', paddingLeft: 15, marginBottom: a.notes ? 4 : 0 }}>
                           {a.activityType && `${a.activityType}`}
                           {a.projectName  && ` · ${a.projectName}`}
                           {a.startDate    && ` · ${fmt(a.startDate)}`}
                           {a.endDate      && ` → ${fmt(a.endDate)}`}
                         </div>
-                        {a.notes && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)', paddingLeft: 14, lineHeight: 1.5 }}>{a.notes}</div>}
+                        {a.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', paddingLeft: 15, lineHeight: 1.5 }}>{a.notes}</div>}
                       </div>
                     ))}
                   </PS>
                 )}
                 {(report.nextMonthPlan || []).length === 0 && nmActs.length === 0 && !report.nextMonthFreeText && (
-                  <div className="dp-empty"><ArrowRight size={28} style={{ opacity: 0.1 }} /><span>No plan submitted</span></div>
+                  <div className="dp-empty"><ArrowRight size={28} style={{ opacity: 0.25 }} /><span>No plan submitted</span></div>
                 )}
                 {report.nextMonthFreeText && (
-                  <div style={{ marginTop: 10, padding: '10px 13px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 1.6 }}>
+                  <div style={{ marginTop: 10, padding: '11px 13px', background: 'var(--surface-nested)', border: '1px solid var(--border-2)', borderRadius: 10, fontSize: 13, color: 'var(--text-3)', lineHeight: 1.6 }}>
                     {report.nextMonthFreeText}
                   </div>
                 )}
               </motion.div>
             )}
 
-            {/* REIMB */}
             {tab === 'reimb' && (
               <motion.div key="reimb" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                 {reimbs.length === 0 ? (
-                  <div className="dp-empty"><Receipt size={28} style={{ opacity: 0.1 }} /><span>No expenses linked</span></div>
+                  <div className="dp-empty"><Receipt size={28} style={{ opacity: 0.25 }} /><span>No expenses linked</span></div>
                 ) : (
                   <>
                     {reimbs.map(r => (
-                      <div key={r._id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <div key={r._id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-2)' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.78)', fontWeight: 500 }}>{r.title}</div>
-                          {r.expenseDate && <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.22)', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>{fmt(r.expenseDate)}</div>}
+                          <div style={{ fontSize: 13, color: 'var(--text-2)', fontWeight: 600 }}>{r.title}</div>
+                          {r.expenseDate && <div style={{ fontSize: 10.5, color: 'var(--text-4)', fontFamily: 'DM Mono,monospace', marginTop: 2 }}>{fmt(r.expenseDate)}</div>}
                         </div>
-                        <span style={{ fontSize: 13, fontFamily: 'DM Mono,monospace', color: '#fb923c', fontWeight: 600 }}>₹{(r.amount || 0).toLocaleString('en-IN')}</span>
-                        <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 100, background: r.status === 'Approved' ? 'rgba(52,211,153,0.12)' : r.status === 'Rejected' ? 'rgba(248,113,113,0.12)' : r.status === 'Paid' ? 'rgba(96,165,250,0.12)' : 'rgba(251,191,36,0.12)', color: r.status === 'Approved' ? '#34d399' : r.status === 'Rejected' ? '#f87171' : r.status === 'Paid' ? '#60a5fa' : '#fbbf24' }}>{r.status}</span>
+                        <span style={{ fontSize: 13, fontFamily: 'DM Mono,monospace', color: '#ea580c', fontWeight: 700 }}>₹{(r.amount || 0).toLocaleString('en-IN')}</span>
+                        <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 100, background: r.status === 'Approved' ? 'rgba(5,150,105,0.12)' : r.status === 'Rejected' ? 'rgba(220,38,38,0.12)' : r.status === 'Paid' ? 'rgba(37,99,235,0.12)' : 'rgba(217,119,6,0.12)', color: r.status === 'Approved' ? '#059669' : r.status === 'Rejected' ? '#dc2626' : r.status === 'Paid' ? '#2563eb' : '#b45309' }}>{r.status}</span>
                       </div>
                     ))}
-                    <div style={{ marginTop: 12, padding: '9px 13px', background: 'rgba(251,146,60,0.06)', border: '1px solid rgba(251,146,60,0.14)', borderRadius: 9, fontSize: 13.5, color: '#fb923c', fontWeight: 700 }}>
+                    <div style={{ marginTop: 12, padding: '10px 13px', background: 'rgba(234,88,12,0.07)', border: '1px solid rgba(234,88,12,0.18)', borderRadius: 9, fontSize: 13.5, color: '#ea580c', fontWeight: 700 }}>
                       Total: ₹{reimbTotal.toLocaleString('en-IN')}
                     </div>
                   </>
@@ -1349,7 +1285,6 @@ const ReportDetail: React.FC<{
           </AnimatePresence>
         </div>
 
-        {/* Review actions */}
         <div className="dp-review">
           {canManagerReview && (
             <div className="dp-review-block">
@@ -1367,8 +1302,8 @@ const ReportDetail: React.FC<{
               <textarea className="dp-review-area" rows={2} value={adminRemarks} onChange={e => setAdminRemarks(e.target.value)} placeholder="Final remarks…" />
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
                 <span className="dp-review-label" style={{ marginBottom: 0 }}><Zap size={11} /> Score</span>
-                <input type="number" min={0} max={100} value={adminScore} onChange={e => setAdminScore(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))} style={{ width: 70, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontFamily: 'DM Mono,monospace', fontSize: 13, padding: '6px 10px', outline: 'none', textAlign: 'center' }} />
-                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)' }}>/ 100</span>
+                <input type="number" min={0} max={100} value={adminScore} onChange={e => setAdminScore(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))} style={{ width: 70, background: 'var(--chip)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontFamily: 'DM Mono,monospace', fontSize: 13, padding: '6px 10px', outline: 'none', textAlign: 'center' }} />
+                <span style={{ fontSize: 11, color: 'var(--text-4)' }}>/ 100</span>
               </div>
               <button className="dp-btn dp-btn-green" disabled={saving === 'approve'} onClick={() => act('approve', { adminRemarks, adminScore }, 'approve')}>
                 {saving === 'approve' ? <Loader2 size={13} style={{ animation: 'dp-spin 0.7s linear infinite' }} /> : <CheckCircle2 size={13} />}
@@ -1378,7 +1313,7 @@ const ReportDetail: React.FC<{
           )}
           {canReject && (
             <div className="dp-review-block">
-              <div className="dp-review-label" style={{ color: '#f87171' }}><X size={11} /> Reject & Return</div>
+              <div className="dp-review-label" style={{ color: '#dc2626' }}><X size={11} /> Reject & Return</div>
               <textarea className="dp-review-area" rows={2} value={rejectionNote} onChange={e => setRejectionNote(e.target.value)} placeholder="What needs fixing…" />
               <button className="dp-btn dp-btn-red" disabled={saving === 'reject'} onClick={() => act('reject', { rejectionNote }, 'reject')}>
                 {saving === 'reject' ? <Loader2 size={13} style={{ animation: 'dp-spin 0.7s linear infinite' }} /> : <X size={13} />}
@@ -1410,10 +1345,17 @@ export const AdminReportReview: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [search,       setSearch]       = useState('');
   const [pdfLoading,   setPdfLoading]   = useState(false);
+  const [theme,        setTheme]        = useState<Theme>(detectInitialTheme);
+
+  // Persist theme choice (local to this view; never touches the global document).
+  useEffect(() => {
+    try { localStorage.setItem(THEME_KEY, theme); } catch { /* ignore */ }
+  }, [theme]);
 
   const isAdmin   = ['super-admin', 'admin', "hr"].includes(user?.accessLevel || '');
   const isManager = ['manager', 'project-manager'].includes(user?.accessLevel || '');
-  const YEARS     = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
+  // Wider range so admins can review any historical or upcoming period.
+  const YEARS     = Array.from({ length: 5 }, (_, i) => now.getFullYear() - 3 + i);
 
   const normalise = (r: MonthlyReport): MonthlyReport => ({
     ...r,
@@ -1452,6 +1394,10 @@ export const AdminReportReview: React.FC = () => {
   }, [month, year]);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
+
+  // When the period changes, close any open detail panel so a report from the
+  // previous month/year is never shown against a newly-selected period.
+  useEffect(() => { setSelected(null); }, [month, year]);
 
   useEffect(() => {
     const hasPending = reports.some(r => ['submitted', 'manager_reviewed'].includes(r.status));
@@ -1526,116 +1472,214 @@ export const AdminReportReview: React.FC = () => {
   const hasPending = reports.some(r => ['submitted', 'manager_reviewed'].includes(r.status));
 
   return (
-    <>
+    <div className="arr-theme-scope" data-theme={theme}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap');
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@400;500&display=swap');
+        .arr-theme-scope, .arr-theme-scope *, .arr-theme-scope *::before, .arr-theme-scope *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        /* LIGHT (default) */
+        .arr-theme-scope[data-theme="light"] {
+          --bg: #f3f4f8;
+          --glow-1: radial-gradient(ellipse 60% 50% at 92% -8%, rgba(124,58,237,0.07) 0%, transparent 60%);
+          --glow-2: radial-gradient(ellipse 50% 45% at 4% 108%, rgba(99,102,241,0.06) 0%, transparent 60%);
+          --surface: #ffffff;
+          --surface-nested: #f7f8fb;
+          --surface-hover: #f6f4ff;
+          --solid: #ffffff;
+          --chip: rgba(15,23,42,0.05);
+          --chip-hover: rgba(15,23,42,0.09);
+          --track: rgba(15,23,42,0.08);
+          --border: rgba(15,23,42,0.09);
+          --border-2: rgba(15,23,42,0.07);
+          --border-strong: rgba(15,23,42,0.14);
+          --text: #0f172a;
+          --text-2: #334155;
+          --text-3: #64748b;
+          --text-4: #94a3b8;
+          --text-faint: #c2cad6;
+          --accent: #7c3aed;
+          --accent-2: #6366f1;
+          --accent-text: #6d28d9;
+          --accent-soft: rgba(124,58,237,0.09);
+          --accent-soft-2: rgba(124,58,237,0.16);
+          --accent-border: rgba(124,58,237,0.24);
+          --shadow-card: 0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05);
+          --shadow-panel: -22px 0 60px rgba(15,23,42,0.16);
+          --overlay: rgba(15,23,42,0.32);
+          --input-bg: #ffffff;
+          --scrollbar: rgba(15,23,42,0.18);
+        }
+        /* DARK */
+        .arr-theme-scope[data-theme="dark"] {
+          --bg: #0a0b12;
+          --glow-1: radial-gradient(ellipse 70% 50% at 88% 0%, rgba(124,58,237,0.13) 0%, transparent 55%);
+          --glow-2: radial-gradient(ellipse 55% 45% at 8% 100%, rgba(88,80,236,0.09) 0%, transparent 55%);
+          --surface: rgba(255,255,255,0.035);
+          --surface-nested: rgba(255,255,255,0.03);
+          --surface-hover: rgba(167,139,250,0.07);
+          --solid: #14151f;
+          --chip: rgba(255,255,255,0.06);
+          --chip-hover: rgba(255,255,255,0.11);
+          --track: rgba(255,255,255,0.08);
+          --border: rgba(255,255,255,0.085);
+          --border-2: rgba(255,255,255,0.05);
+          --border-strong: rgba(255,255,255,0.15);
+          --text: #ffffff;
+          --text-2: rgba(255,255,255,0.82);
+          --text-3: rgba(255,255,255,0.5);
+          --text-4: rgba(255,255,255,0.34);
+          --text-faint: rgba(255,255,255,0.2);
+          --accent: #a78bfa;
+          --accent-2: #818cf8;
+          --accent-text: #a78bfa;
+          --accent-soft: rgba(167,139,250,0.12);
+          --accent-soft-2: rgba(167,139,250,0.2);
+          --accent-border: rgba(167,139,250,0.3);
+          --shadow-card: none;
+          --shadow-panel: -22px 0 60px rgba(0,0,0,0.5);
+          --overlay: rgba(0,0,0,0.7);
+          --input-bg: rgba(255,255,255,0.05);
+          --scrollbar: rgba(255,255,255,0.12);
+        }
 
         .arr-root {
-          min-height: 100vh; background: #07080e;
-          background-image:
-            radial-gradient(ellipse 70% 50% at 88% 0%, rgba(124,58,237,0.11) 0%, transparent 55%),
-            radial-gradient(ellipse 55% 45% at 8% 100%, rgba(88,80,236,0.08) 0%, transparent 55%);
-          padding: 2.75rem 1.75rem 6rem;
-          font-family: 'DM Sans',sans-serif; color: rgba(255,255,255,0.84);
+          min-height: 100vh; background: var(--bg);
+          background-image: var(--glow-1), var(--glow-2);
+          padding: 2.5rem 1.75rem 6rem;
+          font-family: 'DM Sans',sans-serif; color: var(--text-2);
+          transition: background-color 0.3s ease, color 0.3s ease;
         }
-        .arr-wrap { max-width: 1120px; margin: 0 auto; }
-        .arr-eyebrow { font-family: 'DM Mono',monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.22); margin-bottom: 10px; }
-        .arr-title { font-family: 'Syne',sans-serif; font-size: 2rem; font-weight: 800; letter-spacing: -0.05em; color: #fff; }
-        .arr-title em { font-style: normal; background: linear-gradient(120deg,#a78bfa 20%,#818cf8 80%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .arr-sub { font-size: 13px; color: rgba(255,255,255,0.28); margin-top: 6px; margin-bottom: 2rem; }
+        .arr-wrap { max-width: 1180px; margin: 0 auto; }
 
-        .arr-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 1.75rem; }
-        .arr-stat { background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07); border-radius: 14px; padding: 12px 18px; display: flex; align-items: center; gap: 10px; transition: border-color 0.2s; }
-        .arr-stat:hover { border-color: rgba(255,255,255,0.12); }
-        .arr-stat-icon { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .arr-stat-num { font-family: 'Syne',sans-serif; font-size: 1.4rem; font-weight: 800; color: #fff; letter-spacing: -0.04em; line-height: 1; }
-        .arr-stat-label { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 2px; }
+        .arr-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+        .arr-eyebrow { font-family: 'DM Mono',monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-text); margin-bottom: 10px; }
+        .arr-title { font-family: 'Syne',sans-serif; font-size: 2.05rem; font-weight: 800; letter-spacing: -0.05em; color: var(--text); line-height: 1.05; }
+        .arr-title em { font-style: normal; background: linear-gradient(120deg, var(--accent) 12%, var(--accent-2) 88%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        .arr-sub { font-size: 13px; color: var(--text-3); margin-top: 8px; margin-bottom: 2rem; max-width: 640px; }
+
+        .arr-theme-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 40px; padding: 0 14px; border-radius: 11px; background: var(--surface); border: 1px solid var(--border); color: var(--text-2); cursor: pointer; transition: all 0.2s; box-shadow: var(--shadow-card); font-family: 'DM Sans',sans-serif; font-size: 12.5px; font-weight: 600; flex-shrink: 0; }
+        .arr-theme-toggle:hover { border-color: var(--accent-border); color: var(--text); }
+        .arr-theme-toggle .lbl { white-space: nowrap; }
+
+        .arr-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(152px, 1fr)); gap: 12px; margin-bottom: 1.75rem; }
+        .arr-stat { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 18px; display: flex; align-items: center; gap: 12px; transition: border-color 0.2s, transform 0.2s; box-shadow: var(--shadow-card); }
+        .arr-stat:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+        .arr-stat-icon { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .arr-stat-num { font-family: 'Syne',sans-serif; font-size: 1.5rem; font-weight: 800; letter-spacing: -0.04em; line-height: 1; }
+        .arr-stat-label { font-size: 11px; color: var(--text-3); margin-top: 4px; font-weight: 500; }
 
         .arr-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 1.25rem; }
-        .arr-sel { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: rgba(255,255,255,0.75); font-family: 'DM Sans',sans-serif; font-size: 13px; padding: 9px 32px 9px 12px; outline: none; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.28)' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; transition: border-color 0.2s; }
-        .arr-sel:focus { border-color: rgba(167,139,250,0.4); }
-        .arr-sel option { background: #12121e; }
+        .arr-sel { background: var(--input-bg); border: 1px solid var(--border); border-radius: 11px; color: var(--text-2); font-family: 'DM Sans',sans-serif; font-size: 13px; font-weight: 500; padding: 10px 34px 10px 13px; outline: none; cursor: pointer; appearance: none; box-shadow: var(--shadow-card); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; transition: border-color 0.2s; }
+        .arr-sel:focus { border-color: var(--accent-border); }
+        .arr-sel option { background: var(--solid); color: var(--text); }
+        .arr-search { flex: 1; min-width: 200px; position: relative; }
+        .arr-search input { width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 11px; color: var(--text-2); font-family: 'DM Sans',sans-serif; font-size: 13px; padding: 10px 13px 10px 36px; outline: none; box-shadow: var(--shadow-card); transition: border-color 0.2s; }
+        .arr-search input:focus { border-color: var(--accent-border); }
+        .arr-search input::placeholder { color: var(--text-4); }
 
-        .arr-card { background: rgba(255,255,255,0.028); border: 1px solid rgba(255,255,255,0.07); border-radius: 18px; overflow: hidden; }
-        .arr-table { width: 100%; border-collapse: collapse; }
-        .arr-th { padding: 11px 16px; text-align: left; font-family: 'DM Mono',monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.22); background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.055); white-space: nowrap; }
-        .arr-tr { border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.15s; cursor: pointer; }
-        .arr-tr:hover { background: rgba(167,139,250,0.04); }
+        .arr-pdf-btn { display: flex; align-items: center; gap: 8px; padding: 10px 18px; background: linear-gradient(135deg,#7c3aed,#6366f1); color: #fff; border: none; border-radius: 11px; font-family: 'DM Sans',sans-serif; font-weight: 600; font-size: 13px; transition: all 0.2s; box-shadow: 0 6px 18px rgba(124,58,237,0.32); white-space: nowrap; }
+        .arr-pdf-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(124,58,237,0.4); }
+
+        .arr-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; overflow: hidden; box-shadow: var(--shadow-card); }
+        .arr-scroll { width: 100%; overflow-x: auto; }
+        .arr-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+        .arr-th { padding: 13px 18px; text-align: left; font-family: 'DM Mono',monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-4); background: var(--surface-nested); border-bottom: 1px solid var(--border); white-space: nowrap; }
+        .arr-th.num { text-align: center; }
+        .arr-th.right { text-align: right; }
+        .arr-tr { border-bottom: 1px solid var(--border-2); transition: background 0.15s; cursor: pointer; }
+        .arr-tr:hover { background: var(--surface-hover); }
         .arr-tr:last-child { border-bottom: none; }
-        .arr-td { padding: 12px 16px; vertical-align: middle; }
-        .arr-emp { display: flex; align-items: center; gap: 10px; }
-        .arr-av { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; }
-        .arr-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); }
-        .arr-email { font-size: 10.5px; color: rgba(255,255,255,0.28); margin-top: 1px; }
-        .arr-prog { height: 3px; background: rgba(255,255,255,0.07); border-radius: 2px; overflow: hidden; margin-top: 4px; width: 64px; }
+        .arr-td { padding: 14px 18px; vertical-align: middle; }
+        .arr-td.num { text-align: center; }
+        .arr-td.right { text-align: right; }
+        .arr-emp { display: flex; align-items: center; gap: 11px; }
+        .arr-av { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; }
+        .arr-name { font-size: 13px; font-weight: 600; color: var(--text); }
+        .arr-email { font-size: 10.5px; color: var(--text-3); margin-top: 1px; }
+        .arr-task-cell { display: inline-flex; flex-direction: column; align-items: center; gap: 5px; }
+        .arr-prog { height: 4px; background: var(--track); border-radius: 2px; overflow: hidden; width: 70px; }
         .arr-prog-fill { height: 100%; border-radius: 2px; }
-        .arr-view-btn { display: flex; align-items: center; gap: 5px; padding: 6px 13px; border-radius: 9px; background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.22); color: #a78bfa; font-size: 11.5px; font-weight: 500; cursor: pointer; transition: all 0.18s; font-family: 'DM Sans',sans-serif; white-space: nowrap; }
-        .arr-view-btn:hover { background: rgba(124,58,237,0.2); border-color: rgba(167,139,250,0.45); }
-        .arr-empty { text-align: center; padding: 4rem 0; color: rgba(255,255,255,0.18); font-size: 13px; }
+        .arr-view-btn { display: inline-flex; align-items: center; gap: 5px; padding: 7px 13px; border-radius: 9px; background: var(--accent-soft); border: 1px solid var(--accent-border); color: var(--accent-text); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: all 0.18s; font-family: 'DM Sans',sans-serif; white-space: nowrap; }
+        .arr-view-btn:hover { background: var(--accent-soft-2); }
+        .arr-pdf-mini { display: inline-flex; align-items: center; gap: 5px; padding: 7px 13px; border-radius: 9px; background: rgba(234,88,12,0.1); border: 1px solid rgba(234,88,12,0.28); color: #ea580c; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: all 0.18s; font-family: 'DM Sans',sans-serif; white-space: nowrap; margin-right: 8px; }
+        .arr-pdf-mini:hover { background: rgba(234,88,12,0.18); }
+        .arr-dash { font-size: 12px; color: var(--text-4); font-style: italic; }
+        .arr-empty { text-align: center; padding: 4rem 0; color: var(--text-4); font-size: 13px; }
         .arr-loader { display: flex; align-items: center; justify-content: center; padding: 5rem 0; flex-direction: column; gap: 14px; }
-        .arr-spin { width: 30px; height: 30px; border-radius: 50%; border: 2px solid rgba(167,139,250,0.18); border-top-color: #a78bfa; animation: arr-spin 0.9s linear infinite; }
+        .arr-spin { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--accent-soft-2); border-top-color: var(--accent); animation: arr-spin 0.9s linear infinite; }
         @keyframes arr-spin { to { transform: rotate(360deg); } }
 
-        .dp-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.7); backdrop-filter: blur(10px); display: flex; align-items: stretch; justify-content: flex-end; }
-        .dp-panel { background: #0f0f1d; border-left: 1px solid rgba(255,255,255,0.09); width: 100%; max-width: 600px; display: flex; flex-direction: column; overflow: hidden; }
-        .dp-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.25rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.07); flex-shrink: 0; }
-        .dp-close { background: rgba(255,255,255,0.06); border: none; border-radius: 8px; color: rgba(255,255,255,0.35); cursor: pointer; padding: 6px; display: flex; transition: all 0.15s; }
-        .dp-close:hover { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.72); }
-        .dp-tabs { display: flex; gap: 2px; padding: 10px 16px 0; border-bottom: 1px solid rgba(255,255,255,0.055); flex-shrink: 0; overflow-x: auto; scrollbar-width: none; }
+        .dp-overlay { position: fixed; inset: 0; z-index: 200; background: var(--overlay); backdrop-filter: blur(10px); display: flex; align-items: stretch; justify-content: flex-end; }
+        .dp-panel { background: var(--solid); border-left: 1px solid var(--border); width: 100%; max-width: 620px; display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow-panel); }
+        .dp-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.25rem 1rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+        .dp-close { background: var(--chip); border: none; border-radius: 8px; color: var(--text-3); cursor: pointer; padding: 7px; display: flex; transition: all 0.15s; }
+        .dp-close:hover { background: var(--chip-hover); color: var(--text); }
+        .dp-tabs { display: flex; gap: 2px; padding: 10px 16px 0; border-bottom: 1px solid var(--border-2); flex-shrink: 0; overflow-x: auto; scrollbar-width: none; }
         .dp-tabs::-webkit-scrollbar { display: none; }
-        .dp-tab { padding: 7px 12px; font-size: 11.5px; font-weight: 500; border: none; background: none; color: rgba(255,255,255,0.3); cursor: pointer; font-family: 'DM Sans',sans-serif; border-bottom: 2px solid transparent; transition: all 0.18s; margin-bottom: -1px; white-space: nowrap; flex-shrink: 0; }
-        .dp-tab.active { color: #a78bfa; border-bottom-color: #a78bfa; }
-        .dp-tab:not(.active):hover { color: rgba(255,255,255,0.6); }
-        .dp-content { flex: 1; overflow-y: auto; padding: 14px 16px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.07) transparent; }
-        .dp-task { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+        .dp-tab { padding: 8px 13px; font-size: 11.5px; font-weight: 600; border: none; background: none; color: var(--text-3); cursor: pointer; font-family: 'DM Sans',sans-serif; border-bottom: 2px solid transparent; transition: all 0.18s; margin-bottom: -1px; white-space: nowrap; flex-shrink: 0; }
+        .dp-tab.active { color: var(--accent-text); border-bottom-color: var(--accent); }
+        .dp-tab:not(.active):hover { color: var(--text-2); }
+        .dp-content { flex: 1; overflow-y: auto; padding: 16px; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+        .dp-content::-webkit-scrollbar { width: 8px; }
+        .dp-content::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
+        .dp-task { display: flex; align-items: flex-start; gap: 11px; padding: 11px 0; border-bottom: 1px solid var(--border-2); }
         .dp-task:last-child { border-bottom: none; }
-        .dp-empty { text-align: center; padding: 3rem 0; color: rgba(255,255,255,0.18); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-        .dp-review { border-top: 1px solid rgba(255,255,255,0.06); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; background: rgba(0,0,0,0.2); flex-shrink: 0; }
+        .dp-empty { text-align: center; padding: 3rem 0; color: var(--text-4); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+        .dp-review { border-top: 1px solid var(--border); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; background: var(--surface-nested); flex-shrink: 0; }
         .dp-review-block { display: flex; flex-direction: column; gap: 6px; }
-        .dp-review-label { font-size: 9.5px; font-family: 'DM Mono',monospace; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.28); display: flex; align-items: center; gap: 5px; }
-        .dp-review-area { width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 9px; color: rgba(255,255,255,0.72); font-family: 'DM Sans',sans-serif; font-size: 12.5px; padding: 8px 11px; resize: none; outline: none; transition: border-color 0.2s; }
-        .dp-review-area:focus { border-color: rgba(167,139,250,0.32); }
-        .dp-review-area::placeholder { color: rgba(255,255,255,0.14); }
-        .dp-btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 9px; font-size: 12px; font-weight: 600; font-family: 'DM Sans',sans-serif; cursor: pointer; border: none; transition: all 0.2s; width: fit-content; }
-        .dp-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-        .dp-btn-blue  { background: rgba(96,165,250,0.12); color: #60a5fa; border: 1px solid rgba(96,165,250,0.22); }
-        .dp-btn-blue:hover:not(:disabled)  { background: rgba(96,165,250,0.2); }
-        .dp-btn-green { background: linear-gradient(135deg,#059669,#34d399); color: #fff; box-shadow: 0 3px 14px rgba(52,211,153,0.2); }
+        .dp-review-label { font-size: 9.5px; font-family: 'DM Mono',monospace; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); display: flex; align-items: center; gap: 5px; }
+        .dp-review-area { width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 9px; color: var(--text-2); font-family: 'DM Sans',sans-serif; font-size: 12.5px; padding: 9px 11px; resize: none; outline: none; transition: border-color 0.2s; }
+        .dp-review-area:focus { border-color: var(--accent-border); }
+        .dp-review-area::placeholder { color: var(--text-4); }
+        .dp-btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; border-radius: 9px; font-size: 12px; font-weight: 600; font-family: 'DM Sans',sans-serif; cursor: pointer; border: none; transition: all 0.2s; width: fit-content; }
+        .dp-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .dp-btn-blue  { background: rgba(37,99,235,0.12); color: #2563eb; border: 1px solid rgba(37,99,235,0.28); }
+        .dp-btn-blue:hover:not(:disabled)  { background: rgba(37,99,235,0.2); }
+        .dp-btn-green { background: linear-gradient(135deg,#059669,#10b981); color: #fff; box-shadow: 0 4px 14px rgba(5,150,105,0.28); }
         .dp-btn-green:hover:not(:disabled) { transform: translateY(-1px); }
-        .dp-btn-red   { background: rgba(248,113,113,0.1); color: #f87171; border: 1px solid rgba(248,113,113,0.2); }
-        .dp-btn-red:hover:not(:disabled)   { background: rgba(248,113,113,0.18); }
-        .dp-btn-ghost { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.45); border: 1px solid rgba(255,255,255,0.1); }
-        .dp-btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,0.09); }
+        .dp-btn-red   { background: rgba(220,38,38,0.1); color: #dc2626; border: 1px solid rgba(220,38,38,0.26); }
+        .dp-btn-red:hover:not(:disabled)   { background: rgba(220,38,38,0.18); }
+        .dp-btn-ghost { background: var(--chip); color: var(--text-2); border: 1px solid var(--border); }
+        .dp-btn-ghost:hover:not(:disabled) { background: var(--chip-hover); }
         @keyframes dp-spin { to { transform: rotate(360deg); } }
 
         @media (max-width: 860px) {
           .arr-root { padding: 1.5rem 1rem 5rem; }
-          .arr-title { font-size: 1.65rem; }
+          .arr-title { font-size: 1.7rem; }
           .dp-panel { max-width: 100%; }
-          .hide-sm { display: none; }
         }
       `}</style>
 
       <div className="arr-root">
         <div className="arr-wrap">
 
-          <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.38 }}>
-            <div className="arr-eyebrow">{isAdmin ? 'Admin Panel' : 'Manager Panel'} · {MONTHS[month - 1]} {year}</div>
-            <h1 className="arr-title">Team <em>Report Review</em></h1>
-            <p className="arr-sub">
-              Review, approve and score monthly submissions from your team. Auto-refreshes every {hasPending ? '20' : '60'}s.
-            </p>
+          <motion.div className="arr-topbar" initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.38 }}>
+            <div>
+              <div className="arr-eyebrow">{isAdmin ? 'Admin Panel' : 'Manager Panel'} · {MONTHS[month - 1]} {year}</div>
+              <h1 className="arr-title">Team <em>Report Review</em></h1>
+              <p className="arr-sub">
+                Review, approve and score monthly submissions from your team. Use the month and year filters to view any reporting period. Auto-refreshes every {hasPending ? '20' : '60'}s.
+              </p>
+            </div>
+            <button
+              className="arr-theme-toggle"
+              onClick={() => setTheme(t => (t === 'light' ? 'dark' : 'light'))}
+              aria-label="Toggle dark mode"
+              title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+            >
+              {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+              <span className="lbl">{theme === 'light' ? 'Dark' : 'Light'}</span>
+            </button>
           </motion.div>
 
           <motion.div className="arr-stats" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
             {[
-              { icon: <Users size={14} />,       bg: 'rgba(167,139,250,0.14)', c: '#a78bfa', num: stats.total,     label: 'Total'     },
-              { icon: <Send size={14} />,         bg: 'rgba(96,165,250,0.14)',  c: '#60a5fa', num: stats.submitted, label: 'Awaiting'  },
-              { icon: <CheckCircle2 size={14} />, bg: 'rgba(52,211,153,0.14)', c: '#34d399', num: stats.approved,  label: 'Approved'  },
-              { icon: <Clock size={14} />,        bg: 'rgba(251,191,36,0.14)', c: '#fbbf24', num: stats.pending,   label: 'Pending'   },
+              { icon: <Users size={15} />,        bg: 'var(--accent-soft)',      c: 'var(--accent-text)', num: stats.total,     label: 'Total'     },
+              { icon: <Send size={15} />,         bg: 'rgba(37,99,235,0.12)',    c: '#2563eb',            num: stats.submitted, label: 'Awaiting'  },
+              { icon: <CheckCircle2 size={15} />, bg: 'rgba(5,150,105,0.12)',    c: '#059669',            num: stats.approved,  label: 'Approved'  },
+              { icon: <Clock size={15} />,        bg: 'rgba(217,119,6,0.12)',    c: '#b45309',            num: stats.pending,   label: 'Pending'   },
               ...(stats.avgScore !== null
-                ? [{ icon: <Star size={14} />, bg: 'rgba(251,146,60,0.14)', c: '#fb923c', num: `${stats.avgScore}`, label: 'Avg Score' }]
+                ? [{ icon: <Star size={15} />, bg: 'rgba(234,88,12,0.12)', c: '#ea580c', num: `${stats.avgScore}`, label: 'Avg Score' }]
                 : []
               ),
             ].map((s, i) => (
@@ -1650,13 +1694,13 @@ export const AdminReportReview: React.FC = () => {
           </motion.div>
 
           <div className="arr-controls">
-            <select className="arr-sel" value={month} onChange={e => setMonth(Number(e.target.value))}>
+            <select className="arr-sel" value={month} onChange={e => setMonth(Number(e.target.value))} aria-label="Filter by month">
               {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
             </select>
-            <select className="arr-sel" value={year} onChange={e => setYear(Number(e.target.value))}>
+            <select className="arr-sel" value={year} onChange={e => setYear(Number(e.target.value))} aria-label="Filter by year">
               {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
-            <select className="arr-sel" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <select className="arr-sel" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} aria-label="Filter by status">
               <option value="all">All statuses</option>
               <option value="draft">Draft</option>
               <option value="submitted">Submitted</option>
@@ -1664,19 +1708,19 @@ export const AdminReportReview: React.FC = () => {
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
             </select>
-            <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
-              <Search size={13} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.22)', pointerEvents: 'none' }} />
+            <div className="arr-search">
+              <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-4)', pointerEvents: 'none' }} />
               <input
-                style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'rgba(255,255,255,0.75)', fontFamily: 'DM Sans,sans-serif', fontSize: 13, padding: '9px 13px 9px 34px', outline: 'none' }}
                 placeholder="Search employee…"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
             <button
+              className="arr-pdf-btn"
               onClick={handlePDF}
               disabled={pdfLoading || reports.length === 0}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 18px', background: 'linear-gradient(135deg,#7c3aed,#6366f1)', color: '#fff', border: 'none', borderRadius: 10, fontFamily: 'DM Sans,sans-serif', fontWeight: 600, fontSize: 13, cursor: reports.length === 0 ? 'not-allowed' : 'pointer', opacity: reports.length === 0 ? 0.4 : 1, transition: 'all 0.2s', boxShadow: '0 4px 14px rgba(124,58,237,0.3)', whiteSpace: 'nowrap' }}
+              style={{ cursor: reports.length === 0 ? 'not-allowed' : 'pointer', opacity: reports.length === 0 ? 0.45 : 1 }}
             >
               {pdfLoading ? <Loader2 size={15} style={{ animation: 'arr-spin 0.8s linear infinite' }} /> : <Download size={15} />}
               {pdfLoading ? 'Generating…' : 'Team PDF'}
@@ -1686,110 +1730,113 @@ export const AdminReportReview: React.FC = () => {
           {loading ? (
             <div className="arr-loader">
               <div className="arr-spin" />
-              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.2)' }}>Loading reports…</span>
+              <span style={{ fontSize: 12, color: 'var(--text-4)' }}>Loading reports…</span>
             </div>
           ) : (
             <motion.div className="arr-card" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
-              <table className="arr-table">
-                <thead>
-                  <tr>
-                    <th className="arr-th">Employee</th>
-                    <th className="arr-th">Tasks</th>
-                    <th className="arr-th hide-sm">Activities</th>
-                    <th className="arr-th hide-sm">Expenses</th>
-                    <th className="arr-th hide-sm">Next Plans</th>
-                    <th className="arr-th">Status</th>
-                    <th className="arr-th">Score</th>
-                    <th className="arr-th" style={{ textAlign: 'right' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length === 0 ? (
+              <div className="arr-scroll">
+                <table className="arr-table">
+                  <thead>
                     <tr>
-                      <td colSpan={8} className="arr-empty">
-                        <Users size={32} style={{ opacity: 0.1, display: 'block', margin: '0 auto 10px' }} />
-                        {reports.length === 0 ? 'No reports submitted for this period yet' : 'No reports match your filters'}
-                      </td>
+                      <th className="arr-th">Employee</th>
+                      <th className="arr-th num">Tasks</th>
+                      <th className="arr-th num">Activities</th>
+                      <th className="arr-th num">Expenses</th>
+                      <th className="arr-th num">Next Plans</th>
+                      <th className="arr-th num">Status</th>
+                      <th className="arr-th num">Score</th>
+                      <th className="arr-th right">Action</th>
                     </tr>
-                  ) : filtered.map((r, i) => {
-                    const tasks    = r.tasks || [];
-                    const done     = tasks.filter(t => taskIsDone(t)).length;
-                    const total    = tasks.length;
-                    const pct      = total ? Math.round(done / total * 100) : 0;
-                    const sm       = STATUS_META[r.status] ?? STATUS_META.draft;
-                    const pColor   = pct >= 70 ? '#34d399' : pct >= 40 ? '#fbbf24' : '#f87171';
-                    const rActs    = r.activities || [];
-                    const rActDone = rActs.filter(a => a.status === 'Completed').length;
-                    const reimbAmt = (r.reimbursements || []).reduce((s, rb) => s + (rb?.amount || 0), 0);
-                    const nmPlans  = (r.nextMonthPlan || []).length + (r.nextMonthActivities || []).length;
+                  </thead>
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="arr-empty">
+                          <Users size={32} style={{ opacity: 0.25, display: 'block', margin: '0 auto 10px' }} />
+                          {reports.length === 0 ? 'No reports submitted for this period yet' : 'No reports match your filters'}
+                        </td>
+                      </tr>
+                    ) : filtered.map((r, i) => {
+                      const tasks    = r.tasks || [];
+                      const done     = tasks.filter(t => taskIsDone(t)).length;
+                      const total    = tasks.length;
+                      const pct      = total ? Math.round(done / total * 100) : 0;
+                      const sm       = STATUS_META[r.status] ?? STATUS_META.draft;
+                      const pColor   = pct >= 70 ? '#059669' : pct >= 40 ? '#d97706' : '#dc2626';
+                      const rActs    = r.activities || [];
+                      const rActDone = rActs.filter(a => a.status === 'Completed').length;
+                      const reimbAmt = (r.reimbursements || []).reduce((s, rb) => s + (rb?.amount || 0), 0);
+                      const nmPlans  = (r.nextMonthPlan || []).length + (r.nextMonthActivities || []).length;
 
-                    return (
-                      <motion.tr
-                        key={r._id} className="arr-tr"
-                        initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.2 + i * 0.04 }}
-                        onClick={() => setSelected(r)}
-                      >
-                        <td className="arr-td">
-                          <div className="arr-emp">
-                            <div className="arr-av" style={{ background: AVATAR_GRADS[i % AVATAR_GRADS.length] }}>
-                              {initials(empName(r))}
+                      return (
+                        <motion.tr
+                          key={r._id} className="arr-tr"
+                          initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.2 + i * 0.04 }}
+                          onClick={() => setSelected(r)}
+                        >
+                          <td className="arr-td">
+                            <div className="arr-emp">
+                              <div className="arr-av" style={{ background: AVATAR_GRADS[i % AVATAR_GRADS.length] }}>
+                                {initials(empName(r))}
+                              </div>
+                              <div>
+                                <div className="arr-name">{empName(r)}</div>
+                                <div className="arr-email">{empEmail(r)}</div>
+                              </div>
                             </div>
-                            <div>
-                              <div className="arr-name">{empName(r)}</div>
-                              <div className="arr-email">{empEmail(r)}</div>
+                          </td>
+                          <td className="arr-td num">
+                            <div className="arr-task-cell">
+                              <span style={{ fontSize: 12.5, color: pColor, fontFamily: 'DM Mono,monospace', fontWeight: 700 }}>{done}/{total}</span>
+                              <div className="arr-prog"><div className="arr-prog-fill" style={{ width: `${pct}%`, background: pColor }} /></div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="arr-td">
-                          <div style={{ fontSize: 12.5, color: pColor, fontFamily: 'DM Mono,monospace', fontWeight: 600 }}>{done}/{total}</div>
-                          <div className="arr-prog"><div className="arr-prog-fill" style={{ width: `${pct}%`, background: pColor }} /></div>
-                        </td>
-                        <td className="arr-td hide-sm">
-                          {rActs.length > 0
-                            ? <span style={{ fontSize: 12.5, color: '#60a5fa', fontFamily: 'DM Mono,monospace', fontWeight: 600 }}>{rActDone}/{rActs.length}</span>
-                            : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontStyle: 'italic' }}>—</span>
-                          }
-                        </td>
-                        <td className="arr-td hide-sm">
-                          {(r.reimbursements || []).length > 0 ? (
-                            <div style={{ fontSize: 12, color: '#fb923c', fontFamily: 'DM Mono,monospace', fontWeight: 600 }}>
-                              ₹{reimbAmt.toLocaleString('en-IN')}
-                              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)', fontWeight: 400, fontFamily: 'DM Sans,sans-serif' }}>{(r.reimbursements || []).length} claim{(r.reimbursements || []).length !== 1 ? 's' : ''}</div>
-                            </div>
-                          ) : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontStyle: 'italic' }}>—</span>}
-                        </td>
-                        <td className="arr-td hide-sm">
-                          {nmPlans > 0
-                            ? <span style={{ fontSize: 12.5, color: '#a78bfa', fontFamily: 'DM Mono,monospace', fontWeight: 600 }}>{nmPlans}</span>
-                            : <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontStyle: 'italic' }}>—</span>}
-                        </td>
-                        <td className="arr-td">
-                          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 9px', borderRadius: 100, fontSize: 10.5, fontWeight: 500, background: sm.bg, color: sm.color, border: `1px solid ${sm.border}`, whiteSpace: 'nowrap' }}>{sm.label}</span>
-                        </td>
-                        <td className="arr-td">
-                          {r.status === 'approved' && typeof r.adminScore === 'number'
-                            ? <span style={{ fontSize: 13, fontWeight: 700, color: '#34d399', fontFamily: 'DM Mono,monospace' }}>{r.adminScore}<span style={{ fontSize: 10, fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>/100</span></span>
-                            : <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: 12 }}>—</span>
-                          }
-                        </td>
-                        <td className="arr-td" style={{ textAlign: 'right' }}>
-                          <button
-                            onClick={e => { e.stopPropagation(); downloadEmployeePDF(r); }}
-                            className="arr-view-btn"
-                            style={{ background: 'rgba(251,146,60,0.1)', borderColor: 'rgba(251,146,60,0.3)', color: '#fb923c', marginRight: 8 }}
-                          >
-                            <Download size={12} /> PDF
-                          </button>
-                          <button className="arr-view-btn" onClick={e => { e.stopPropagation(); setSelected(r); }}>
-                            <Eye size={12} /> Review
-                          </button>
-                        </td>
-                      </motion.tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td className="arr-td num">
+                            {rActs.length > 0
+                              ? <span style={{ fontSize: 12.5, color: '#2563eb', fontFamily: 'DM Mono,monospace', fontWeight: 700 }}>{rActDone}/{rActs.length}</span>
+                              : <span className="arr-dash">—</span>
+                            }
+                          </td>
+                          <td className="arr-td num">
+                            {(r.reimbursements || []).length > 0 ? (
+                              <div style={{ fontSize: 12, color: '#ea580c', fontFamily: 'DM Mono,monospace', fontWeight: 700 }}>
+                                ₹{reimbAmt.toLocaleString('en-IN')}
+                                <div style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 400, fontFamily: 'DM Sans,sans-serif', marginTop: 2 }}>{(r.reimbursements || []).length} claim{(r.reimbursements || []).length !== 1 ? 's' : ''}</div>
+                              </div>
+                            ) : <span className="arr-dash">—</span>}
+                          </td>
+                          <td className="arr-td num">
+                            {nmPlans > 0
+                              ? <span style={{ fontSize: 12.5, color: 'var(--accent-text)', fontFamily: 'DM Mono,monospace', fontWeight: 700 }}>{nmPlans}</span>
+                              : <span className="arr-dash">—</span>}
+                          </td>
+                          <td className="arr-td num">
+                            <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 100, fontSize: 10.5, fontWeight: 600, background: sm.bg, color: sm.color, border: `1px solid ${sm.border}`, whiteSpace: 'nowrap' }}>{sm.label}</span>
+                          </td>
+                          <td className="arr-td num">
+                            {r.status === 'approved' && typeof r.adminScore === 'number'
+                              ? <span style={{ fontSize: 13, fontWeight: 700, color: '#059669', fontFamily: 'DM Mono,monospace' }}>{r.adminScore}<span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-4)' }}>/100</span></span>
+                              : <span className="arr-dash">—</span>
+                            }
+                          </td>
+                          <td className="arr-td right" style={{ whiteSpace: 'nowrap' }}>
+                            <button
+                              onClick={e => { e.stopPropagation(); downloadEmployeePDF(r); }}
+                              className="arr-pdf-mini"
+                            >
+                              <Download size={12} /> PDF
+                            </button>
+                            <button className="arr-view-btn" onClick={e => { e.stopPropagation(); setSelected(r); }}>
+                              <Eye size={12} /> Review
+                            </button>
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </motion.div>
           )}
         </div>
@@ -1806,6 +1853,6 @@ export const AdminReportReview: React.FC = () => {
           />
         )}
       </AnimatePresence>
-    </>
+    </div>
   );
 };
