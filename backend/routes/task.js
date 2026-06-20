@@ -7,6 +7,11 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs").promises;
 
+// Roles that can READ ALL tasks. HR is read-only, so it's added to the read
+// scope only — it still can't create/update/delete (those use ADMIN_ROLES /
+// per-handler ownership checks below).
+const READ_ALL_ROLES = [...ADMIN_ROLES, "hr"];
+
 // ─── Multer (unchanged) ───────────────────────────────────────────────────────
 const ALLOWED_MIME_TYPES = [
   "image/jpeg",
@@ -58,13 +63,12 @@ const deleteFileIfExists = async (filePath) => {
 };
 
 // ─── GET all tasks ─────────────────────────────────────────────────────────────
-// Non-admins: only see tasks THEY created (assigner === me).
-// Admins:     see all tasks, optionally filtered by `assigner` query param.
-//             The query param is called `assignee` for backward-compat with
-//             existing monthly-report calls — we map it to `assigner` here.
+// Read-all roles (super-admin, admin, HR): see all tasks, optionally filtered
+//   by `assigner`/`assignee` query param (used by Employee Reports).
+// Everyone else: only tasks THEY created (assigner === me).
 router.get("/", [auth, can("tasks", "read")], async (req, res) => {
   try {
-    const isAdmin = ADMIN_ROLES.includes(req.user.accessLevel);
+    const isReadAll = READ_ALL_ROLES.includes(req.user.accessLevel);
 
     // Support both ?assigner=id and legacy ?assignee=id from monthly-report
     const { project, status, search, assignee, assigner, month, year } =
@@ -73,11 +77,11 @@ router.get("/", [auth, can("tasks", "read")], async (req, res) => {
 
     const andConditions = [];
 
-    if (!isAdmin) {
+    if (!isReadAll) {
       // Employees only see their own tasks
       andConditions.push({ assigner: req.user.id });
     } else if (ownerFilter) {
-      // Admin filters by a specific employee's tasks
+      // Admin/HR filters by a specific employee's tasks
       andConditions.push({ assigner: ownerFilter });
     }
 
@@ -138,10 +142,10 @@ router.get("/:id", [auth, can("tasks", "read")], async (req, res) => {
 
     if (!task) return res.status(404).json({ msg: "Task not found" });
 
-    const isAdmin = ADMIN_ROLES.includes(req.user.accessLevel);
+    const isReadAll = READ_ALL_ROLES.includes(req.user.accessLevel);
     const isCreator = task.assigner?._id?.toString() === req.user.id;
 
-    if (!isAdmin && !isCreator) {
+    if (!isReadAll && !isCreator) {
       return res.status(403).json({ msg: "Access denied" });
     }
     res.json(task);
@@ -152,8 +156,6 @@ router.get("/:id", [auth, can("tasks", "read")], async (req, res) => {
 });
 
 // ─── CREATE task ───────────────────────────────────────────────────────────────
-// assigner is always set to the logged-in user.
-// No assignee — employee creates a task for themselves only.
 router.post(
   "/",
   [auth, can("tasks", "create"), upload.array("attachments", MAX_FILES)],
@@ -168,7 +170,6 @@ router.post(
           }))
         : [];
 
-      // Strip assignee even if client accidentally sends it
       const { assignee: _removed, ...bodyWithoutAssignee } = req.body;
 
       const task = new Task({
@@ -229,7 +230,6 @@ router.put(
       }
 
       Object.keys(req.body).forEach((key) => {
-        // Never allow reassigning the creator or mutating attachments via body
         if (
           ![
             "attachments",

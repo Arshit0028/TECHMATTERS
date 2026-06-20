@@ -4,12 +4,31 @@ const router = express.Router();
 const { body, query, param, validationResult } = require("express-validator");
 const Reimbursement = require("../models/Reimbursement");
 const auth = require("../middleware/auth");
-const { can, ADMIN_ROLES } = require("../middleware/permissions");
+const {
+  can,
+  hasPermission,
+  ADMIN_ROLES,
+} = require("../middleware/permissions");
 const upload = require("../middleware/upload");
 
 // ── Helper: HR can see and action all reims, but not mark as Paid ─────────────
 const isAdminOrHR = (accessLevel) =>
   ADMIN_ROLES.includes(accessLevel) || accessLevel === "hr";
+
+// ── Gate for the status route ────────────────────────────────────────────────
+// HR's permission set is ["read","approve","reject"] — it has NO "update".
+// The status endpoint must therefore accept update OR approve OR reject,
+// otherwise HR's Approve/Reject buttons 403. The "no Paid for HR" rule is still
+// enforced inside the handler.
+const canActionReimbursement = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ msg: "Unauthorized" });
+  const ok =
+    hasPermission(req.user, "reimbursements", "update") ||
+    hasPermission(req.user, "reimbursements", "approve") ||
+    hasPermission(req.user, "reimbursements", "reject");
+  if (ok) return next();
+  return res.status(403).json({ msg: "Missing permission on reimbursements" });
+};
 
 // GET all reimbursements (with pagination & filters)
 router.get(
@@ -33,7 +52,7 @@ router.get(
       return res.status(400).json({ errors: errors.array() });
 
     try {
-      const isAdmin = isAdminOrHR(req.user.accessLevel); // ← updated (was ADMIN_ROLES.includes)
+      const isAdmin = isAdminOrHR(req.user.accessLevel);
       const {
         status,
         project,
@@ -46,7 +65,6 @@ router.get(
 
       const filter = {};
 
-      // Admins/HR can filter by a specific employee; non-admins see only their own
       if (!isAdmin) {
         filter.employee = req.user.id;
       } else if (employee) {
@@ -56,7 +74,6 @@ router.get(
       if (status) filter.status = status;
       if (project) filter.project = project;
 
-      // Filter by expense month + year if both are provided
       if (month && year) {
         const m = parseInt(month);
         const y = parseInt(year);
@@ -110,7 +127,7 @@ router.get(
       if (!reimbursement)
         return res.status(404).json({ msg: "Reimbursement not found" });
 
-      const isAdmin = isAdminOrHR(req.user.accessLevel); // ← updated (was ADMIN_ROLES.includes)
+      const isAdmin = isAdminOrHR(req.user.accessLevel);
       if (!isAdmin && reimbursement.employee?._id?.toString() !== req.user.id) {
         return res.status(403).json({ msg: "Access denied" });
       }
@@ -134,7 +151,6 @@ router.post(
     body("description").trim().isLength({ min: 10 }),
     body("amount").isFloat({ min: 1 }),
     body("expenseDate").isISO8601(),
-    // submittedTo is now optional — removed from frontend form
     body("submittedTo")
       .optional({ nullable: true, checkFalsy: true })
       .isMongoId(),
@@ -152,7 +168,6 @@ router.post(
         uploadedBy: req.user.id,
       }));
 
-      // Build reimbursement data — only include submittedTo if provided
       const reimbData = {
         title: req.body.title,
         description: req.body.description,
@@ -181,12 +196,12 @@ router.post(
   },
 );
 
-// UPDATE status
+// UPDATE status  (HR: Approve/Reject only; Paid is admin/finance only)
 router.put(
   "/:id/status",
   [
     auth,
-    can("reimbursements", "update"),
+    canActionReimbursement, // ← was can("reimbursements","update") — blocked HR
     param("id").isMongoId(),
     body("status").optional().isIn(["Approved", "Rejected", "Paid"]),
     body("reviewerComments").optional().trim(),
@@ -200,7 +215,7 @@ router.put(
       return res.status(400).json({ errors: errors.array() });
 
     try {
-      // ← HR can Approve/Reject but not mark as Paid (finance/admin only)
+      // HR can Approve/Reject but not mark as Paid (finance/admin only)
       if (req.user.accessLevel === "hr" && req.body.status === "Paid") {
         return res
           .status(403)

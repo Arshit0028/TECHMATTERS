@@ -7,6 +7,10 @@ const path = require("path");
 
 const Activity = require("../models/Activity");
 const auth = require("../middleware/auth");
+const { ADMIN_ROLES } = require("../middleware/permissions");
+
+// Roles that can READ ALL activities (read-only for HR).
+const READ_ALL_ROLES = [...ADMIN_ROLES, "hr"];
 
 // ── Multer setup for attachments ─────────────────────────────────────
 const storage = multer.diskStorage({
@@ -19,8 +23,6 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
-
-// Make sure uploads folder exists (create it manually or add in server.js)
 
 // ── Create Activity ──────────────────────────────────────────────────
 router.post("/", auth, upload.array("attachments", 10), async (req, res) => {
@@ -50,7 +52,6 @@ router.post("/", auth, upload.array("attachments", 10), async (req, res) => {
       status: status || "Pending",
     });
 
-    // Handle attachments
     if (req.files && req.files.length > 0) {
       activity.attachments = req.files.map((file) => ({
         name: file.originalname,
@@ -88,7 +89,7 @@ router.put("/:id", auth, upload.array("attachments", 10), async (req, res) => {
     const activity = await Activity.findById(req.params.id);
     if (!activity) return res.status(404).json({ msg: "Activity not found" });
 
-    // Only owner or admin can edit
+    // Only owner can edit (admins/HR remain read-only here).
     if (activity.assignee.toString() !== req.user.id) {
       return res.status(403).json({ msg: "Not authorized" });
     }
@@ -101,7 +102,6 @@ router.put("/:id", auth, upload.array("attachments", 10), async (req, res) => {
     if (priority) activity.priority = priority;
     if (status) activity.status = status;
 
-    // New attachments
     if (req.files && req.files.length > 0) {
       const newAttachments = req.files.map((file) => ({
         name: file.originalname,
@@ -125,12 +125,26 @@ router.put("/:id", auth, upload.array("attachments", 10), async (req, res) => {
 });
 
 // ── Get all activities (for list) ────────────────────────────────────
+// Read-all roles (admins, HR): see everyone's activities, optionally scoped to
+//   a single employee via ?assignee=<userId> (used by Employee Reports).
+// Everyone else: only their own activities.
 router.get("/", auth, async (req, res) => {
   try {
-    const activities = await Activity.find({ assignee: req.user.id })
+    const isReadAll = READ_ALL_ROLES.includes(req.user.accessLevel);
+    const { assignee } = req.query;
+
+    const filter = {};
+    if (!isReadAll) {
+      filter.assignee = req.user.id;
+    } else if (assignee && mongoose.Types.ObjectId.isValid(assignee)) {
+      filter.assignee = assignee;
+    }
+
+    const activities = await Activity.find(filter)
       .populate("assignee", "name")
       .populate("task", "title")
       .sort({ createdAt: -1 });
+
     res.json(activities);
   } catch (err) {
     console.error(err);

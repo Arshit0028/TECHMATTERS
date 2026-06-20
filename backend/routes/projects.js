@@ -7,22 +7,20 @@ const Project = require("../models/Project");
 const auth = require("../middleware/auth");
 const { can } = require("../middleware/permissions");
 
-// Roles that can see ALL projects (admin views)
+// Roles that can MUTATE / are treated as owners on write paths (progress, etc.)
 const ADMIN_ROLES = ["super-admin", "admin", "manager", "project-manager"];
+
+// Roles that can READ ALL projects. HR is read-only across the app, so it is
+// added here (read scope) but intentionally NOT to ADMIN_ROLES (write scope).
+const READ_ALL_ROLES = [...ADMIN_ROLES, "hr"];
 
 /* ============================================================
    Helper: build a user-scoped project filter
-   - Admins/managers/project-managers: see ALL projects
+   - READ_ALL_ROLES (admins/managers/PMs/HR): see ALL projects
    - Everyone else: sees projects where they are a teamMember,
      projectManager, createdBy, OR the reportingManager of any
      team member on the project
 ============================================================ */
-// ── Reportee lookup cache ─────────────────────────────────────────────────────
-// buildUserFilter previously hit the DB with User.find({ reportingManager })
-// on EVERY project request. Org charts change rarely, so we cache the reportee
-// id list per-manager for a short TTL. This removes one query per request on
-// the hot project-list path without risking stale access (60s is well under
-// any realistic "added a report, must see their projects instantly" need).
 const REPORTEE_TTL_MS = 60 * 1000;
 const reporteeCache = new Map(); // uid string -> { ids, expiresAt }
 
@@ -40,38 +38,28 @@ async function getReporteeIds(uid) {
 }
 
 async function buildUserFilter(user, extraFilter = {}) {
-  if (ADMIN_ROLES.includes(user.accessLevel)) {
-    return extraFilter; // no restriction
+  // ✅ HR + admins/managers/PMs: no restriction
+  if (READ_ALL_ROLES.includes(user.accessLevel)) {
+    return extraFilter;
   }
 
   const uid = new mongoose.Types.ObjectId(user.id);
-
-  // Find all users who report to this user (cached — see getReporteeIds)
   const reporteeIds = await getReporteeIds(uid);
 
-  // User can see a project if they are:
-  // 1. A direct team member
-  // 2. The project manager
-  // 3. The creator
-  // 4. The reporting manager of any team member on the project
   const userConditions = [
     { teamMembers: { $in: [uid] } },
     { projectManager: uid },
     { createdBy: uid },
   ];
-
   if (reporteeIds.length > 0) {
     userConditions.push({ teamMembers: { $in: reporteeIds } });
   }
 
-  return {
-    $and: [{ $or: userConditions }, extraFilter],
-  };
+  return { $and: [{ $or: userConditions }, extraFilter] };
 }
 
 /* ============================================================
-   GET /api/projects/my-projects
-   Kept for backward compatibility — same logic as GET /
+   GET /api/projects/my-projects  (backward compatible)
 ============================================================ */
 router.get("/my-projects", auth, async (req, res) => {
   try {
@@ -105,9 +93,7 @@ router.get("/my-projects", auth, async (req, res) => {
 
 /* ============================================================
    GET /api/projects
-   ✅ NOW FILTERED BY USER — entry/tech users only see their own
-   Admins/managers see all.
-   Supports: page, limit, search, status, priority query params
+   READ_ALL_ROLES (incl. HR) see all; others see their own.
 ============================================================ */
 router.get("/", [auth, can("projects", "read")], async (req, res) => {
   try {
@@ -126,7 +112,6 @@ router.get("/", [auth, can("projects", "read")], async (req, res) => {
       ];
     }
 
-    // ✅ KEY FIX: scope query to the requesting user
     const filter = await buildUserFilter(req.user, extraFilter);
 
     const [projects, total] = await Promise.all([
@@ -168,8 +153,8 @@ router.get("/:id", [auth, can("projects", "read")], async (req, res) => {
 
     if (!project) return res.status(404).json({ msg: "Project not found" });
 
-    // Non-admin users can only view projects they belong to
-    if (!ADMIN_ROLES.includes(req.user.accessLevel)) {
+    // Read-all roles (incl. HR) may view any project.
+    if (!READ_ALL_ROLES.includes(req.user.accessLevel)) {
       const User = require("../models/User");
       const uid = req.user.id;
 
@@ -183,7 +168,6 @@ router.get("/:id", [auth, can("projects", "read")], async (req, res) => {
         ? (project.createdBy._id || project.createdBy).toString()
         : "";
 
-      // Check if user is reporting manager of any team member
       const memberObjectIds = (project.teamMembers || []).map(
         (m) => m._id || m,
       );
@@ -269,8 +253,7 @@ router.put("/:id", [auth, can("projects", "write")], async (req, res) => {
 });
 
 /* ============================================================
-   DELETE /api/projects/:id
-   Cascade: removes orphaned tasks & activities
+   DELETE /api/projects/:id  (cascade)
 ============================================================ */
 router.delete("/:id", [auth, can("projects", "delete")], async (req, res) => {
   try {
@@ -285,7 +268,7 @@ router.delete("/:id", [auth, can("projects", "delete")], async (req, res) => {
         Activity.deleteMany({ project: project._id }),
       ]);
     } catch (_) {
-      // Models may not exist in all setups — non-fatal
+      // non-fatal
     }
 
     await project.deleteOne();
@@ -298,7 +281,7 @@ router.delete("/:id", [auth, can("projects", "delete")], async (req, res) => {
 
 /* ============================================================
    POST /api/projects/:id/progress
-   Any authenticated user who belongs to the project can update
+   WRITE path — HR (read-only) is NOT treated as owner here.
 ============================================================ */
 router.post("/:id/progress", auth, async (req, res) => {
   try {
@@ -309,7 +292,6 @@ router.post("/:id/progress", auth, async (req, res) => {
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ msg: "Project not found" });
 
-    // Verify user belongs to this project (admins always allowed)
     const members = (project.teamMembers || []).map((m) => m.toString());
     const mgr = project.projectManager?.toString();
     const creator = project.createdBy?.toString();
@@ -343,7 +325,6 @@ router.post("/:id/progress", auth, async (req, res) => {
 
 /* ============================================================
    DELETE /api/projects/:id/progress/:entryId
-   Remove a single progress update entry
 ============================================================ */
 router.delete("/:id/progress/:entryId", auth, async (req, res) => {
   try {
@@ -354,7 +335,6 @@ router.delete("/:id/progress/:entryId", auth, async (req, res) => {
       (u) => u._id?.toString() === req.params.entryId,
     );
 
-    // Only the author or an admin can delete
     const isAuthor = entry?.addedBy?.toString() === req.user.id;
     const isAdmin = ADMIN_ROLES.includes(req.user.accessLevel);
 
