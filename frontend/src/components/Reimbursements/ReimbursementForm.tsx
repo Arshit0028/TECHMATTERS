@@ -430,17 +430,16 @@ export const ReimbursementForm: React.FC = () => {
                           <Upload size={16} color="#a78bfa" />
                         </div>
                         <div className="rf-drop-title">Drop files here or click to browse</div>
-                        <div className="rf-drop-sub">{ALLOWED_EXT} · Max {MAX_FILE_MB}MB each</div>
+                        <div className="rf-drop-sub">{ALLOWED_EXT.join(', ')} · Max {MAX_FILE_MB}MB each</div>
                         <div className="rf-drop-sub" style={{ color: 'rgba(167,139,250,0.45)', marginTop: 2 }}>
                           {receipts.length}/{MAX_RECEIPTS} uploaded
                         </div>
                       </div>
-
                       <input
                         ref={fileInputRef}
                         type="file"
                         multiple
-                        accept={ALLOWED_EXT}
+                        accept={ALLOWED_EXT.join(',')}
                         style={{ display: 'none' }}
                         onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }}
                       />
