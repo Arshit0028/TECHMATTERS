@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Eye, Calendar, Loader2, CheckCircle2, PlayCircle } from 'lucide-react';
+import { Plus, Eye, Calendar, Loader2, CheckCircle2, PlayCircle, Repeat } from 'lucide-react';
 import api from '../../api/client';
 import type { Activity } from '../types/index';
 
@@ -48,6 +48,37 @@ export const ActivityList: React.FC = () => {
     a.name.toLowerCase().includes(search.toLowerCase()) ||
     (a.description && a.description.toLowerCase().includes(search.toLowerCase()))
   );
+
+  // Renders the date/schedule line for a card depending on activity type:
+  // Daily has no dates, Weekly shows its selected days, everything else
+  // shows the original start-date display.
+  const renderSchedule = (activity: Activity) => {
+    if (activity.activityType === 'Daily') {
+      return (
+        <div className="flex items-center gap-1">
+          <Repeat size={14} />
+          Every day
+        </div>
+      );
+    }
+
+    if (activity.activityType === 'Weekly') {
+      const days = (activity as any).reminderDays as string[] | undefined;
+      return (
+        <div className="flex items-center gap-1">
+          <Repeat size={14} />
+          {days && days.length > 0 ? days.join(', ') : 'No days set'}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-1">
+        <Calendar size={14} />
+        {activity.startDate ? new Date(activity.startDate).toLocaleDateString('en-IN') : '—'}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-[#07080e] text-white p-8">
@@ -115,12 +146,7 @@ export const ActivityList: React.FC = () => {
                   <p className="text-gray-400 text-sm mb-5 line-clamp-2">{activity.description || 'No description'}</p>
 
                   <div className="flex items-center justify-between text-xs text-gray-400 mb-5">
-                    <div className="flex items-center gap-1">
-                      <Calendar size={14} />
-                      {activity.startDate
-                        ? new Date(activity.startDate).toLocaleDateString('en-IN')
-                        : '—'}
-                    </div>
+                    {renderSchedule(activity)}
                     <button
                       onClick={() => navigate(`/activities/${activity._id}`)}
                       className="flex items-center gap-1 text-violet-400 hover:text-violet-300"

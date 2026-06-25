@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Task = require("../models/Task");
+const { nextSeq } = require("../models/Counter"); // ← new
 const auth = require("../middleware/auth");
 const { can, ADMIN_ROLES } = require("../middleware/permissions");
 const multer = require("multer");
@@ -70,18 +71,15 @@ router.get("/", [auth, can("tasks", "read")], async (req, res) => {
   try {
     const isReadAll = READ_ALL_ROLES.includes(req.user.accessLevel);
 
-    // Support both ?assigner=id and legacy ?assignee=id from monthly-report
     const { project, status, search, assignee, assigner, month, year } =
       req.query;
-    const ownerFilter = assigner || assignee; // whichever is provided
+    const ownerFilter = assigner || assignee;
 
     const andConditions = [];
 
     if (!isReadAll) {
-      // Employees only see their own tasks
       andConditions.push({ assigner: req.user.id });
     } else if (ownerFilter) {
-      // Admin/HR filters by a specific employee's tasks
       andConditions.push({ assigner: ownerFilter });
     }
 
@@ -122,7 +120,7 @@ router.get("/", [auth, can("tasks", "read")], async (req, res) => {
       .populate("assigner", "name email")
       .populate("attachments.uploadedBy", "name email")
       .populate("dependencies", "title status")
-      .sort({ createdAt: -1 });
+      .sort({ taskNumber: -1 }); // ← sort by task number (newest first)
 
     res.json(tasks);
   } catch (err) {
@@ -161,6 +159,12 @@ router.post(
   [auth, can("tasks", "create"), upload.array("attachments", MAX_FILES)],
   async (req, res) => {
     try {
+      // ── Atomically reserve the next task number ────────────────────────────
+      // nextSeq uses findOneAndUpdate + $inc + upsert on the Counter collection,
+      // which is safe under concurrent writes — no two tasks can get the same
+      // number even if multiple requests arrive simultaneously.
+      const taskNumber = await nextSeq("taskNumber");
+
       const attachments = req.files
         ? req.files.map((file) => ({
             name: file.originalname,
@@ -175,6 +179,7 @@ router.post(
       const task = new Task({
         ...bodyWithoutAssignee,
         assigner: req.user.id,
+        taskNumber, // ← stored in DB
         attachments,
       });
 
@@ -236,9 +241,10 @@ router.put(
             "removedAttachments",
             "assigner",
             "assignee",
+            "taskNumber",
           ].includes(key)
         ) {
-          task[key] = req.body[key];
+          task[key] = req.body[key]; // taskNumber is immutable after creation
         }
       });
 
@@ -277,7 +283,9 @@ router.delete("/:id", auth, async (req, res) => {
     }
 
     await Task.findByIdAndDelete(req.params.id);
-    console.log(`✅ Task deleted: ${req.params.id} by user ${req.user.id}`);
+    console.log(
+      `✅ Task #${task.taskNumber ?? "?"} deleted: ${req.params.id} by user ${req.user.id}`,
+    );
     res.json({ msg: "Task deleted successfully" });
   } catch (err) {
     console.error("❌ Delete task error:", err);

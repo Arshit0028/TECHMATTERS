@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Sun,
   Moon,
+  Bell,
 } from 'lucide-react';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -29,10 +30,30 @@ interface NavLinkItem {
   badge?: number;
 }
 
+interface NotificationItem {
+  _id: string;
+  type: 'activity_created' | 'activity_reminder';
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: string;
+}
+
 const getAuthToken = (): string | null =>
   localStorage.getItem('token') ||
   localStorage.getItem('authToken') ||
   localStorage.getItem('jwt');
+
+const timeAgo = (iso: string): string => {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+};
 
 export const Navbar = () => {
   const { user, logout } = useAuth();
@@ -50,7 +71,13 @@ export const Navbar = () => {
   const [userMenuOpen, setUserMenuOpen]         = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
 
-  const userMenuRef = useRef<HTMLDivElement>(null);
+  const [notifications, setNotifications]   = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount]       = useState(0);
+  const [notifOpen, setNotifOpen]           = useState(false);
+  const [notifLoading, setNotifLoading]     = useState(true);
+
+  const userMenuRef  = useRef<HTMLDivElement>(null);
+  const notifMenuRef = useRef<HTMLDivElement>(null);
 
   // Derive role flags using optional chaining so they work when user is null
   const isAdmin      = user?.accessLevel === 'admin' || user?.accessLevel === 'super-admin';
@@ -68,6 +95,7 @@ export const Navbar = () => {
   useEffect(() => {
     setMobileMenuOpen(false);
     setUserMenuOpen(false);
+    setNotifOpen(false);
   }, [location.pathname]);
 
   // Click-outside to close user dropdown
@@ -75,6 +103,17 @@ export const Navbar = () => {
     const handle = (e: MouseEvent) => {
       if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
         setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
+
+  // Click-outside to close notifications dropdown
+  useEffect(() => {
+    const handle = (e: MouseEvent) => {
+      if (notifMenuRef.current && !notifMenuRef.current.contains(e.target as Node)) {
+        setNotifOpen(false);
       }
     };
     document.addEventListener('mousedown', handle);
@@ -103,6 +142,67 @@ export const Navbar = () => {
     const id = setInterval(fetchPendingCount, 60_000);
     return () => clearInterval(id);
   }, [fetchPendingCount]);
+
+  // Notifications — same fetch+poll shape as fetchPendingCount above.
+  // Hitting GET /api/notifications also lazily generates today's reminder
+  // for the user's Daily/Weekly activities server-side, so polling this is
+  // what actually surfaces new reminders, not a separate mechanism.
+  const fetchNotifications = useCallback(async () => {
+    const token = getAuthToken();
+    if (!token) {
+      setNotifLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch('/api/notifications', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
+      setUnreadCount(typeof data.unreadCount === 'number' ? data.unreadCount : 0);
+    } catch {
+      // silent — bell just won't update this cycle
+    } finally {
+      setNotifLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const id = setInterval(fetchNotifications, 60_000);
+    return () => clearInterval(id);
+  }, [fetchNotifications]);
+
+  const markNotificationRead = async (id: string) => {
+    setNotifications((prev) => prev.map((n) => (n._id === id ? { ...n, read: true } : n)));
+    setUnreadCount((c) => Math.max(0, c - 1));
+    const token = getAuthToken();
+    if (!token) return;
+    try {
+      await fetch(`/api/notifications/${id}/read`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // best-effort — next poll will resync if this silently failed
+    }
+  };
+
+  const markAllNotificationsRead = async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadCount(0);
+    const token = getAuthToken();
+    if (!token) return;
+    try {
+      await fetch('/api/notifications/read-all', {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // best-effort — next poll will resync if this silently failed
+    }
+  };
 
   // ── Safe early return — ALL hooks are already registered above ───────────
   if (!user) return null;
@@ -284,6 +384,113 @@ export const Navbar = () => {
         .tm-theme-toggle:hover { background: rgba(0,0,0,0.06); }
         [data-theme="dark"] .tm-theme-toggle       { color: rgba(255,255,255,0.60); }
         [data-theme="dark"] .tm-theme-toggle:hover { color: rgba(255,255,255,0.92); background: rgba(255,255,255,0.09); }
+
+        /* ── Notifications ─────────────────────────────────────────────── */
+        .tm-notif-wrap { position: relative; }
+        .tm-bell-btn {
+          position: relative;
+          display: flex; align-items: center; justify-content: center;
+          width: 32px; height: 32px;
+          border-radius: 8px; border: none;
+          background: transparent; cursor: pointer;
+          color: #3a3a3c;
+          transition: background 0.13s, color 0.13s;
+          flex-shrink: 0;
+        }
+        .tm-bell-btn:hover { background: rgba(0,0,0,0.06); }
+        [data-theme="dark"] .tm-bell-btn       { color: rgba(255,255,255,0.60); }
+        [data-theme="dark"] .tm-bell-btn:hover { color: rgba(255,255,255,0.92); background: rgba(255,255,255,0.09); }
+
+        .tm-bell-badge {
+          position: absolute;
+          top: 2px; right: 2px;
+          display: inline-flex; align-items: center; justify-content: center;
+          min-width: 15px; height: 15px;
+          border-radius: 999px;
+          background: #ef4444; color: #fff;
+          font-size: 9px; font-weight: 700;
+          padding: 0 3px; line-height: 1;
+        }
+        [data-theme="dark"] .tm-bell-badge { background: #f87171; color: #1a0000; }
+
+        .tm-notif-dropdown {
+          position: absolute;
+          top: calc(100% + 8px); right: 0;
+          width: min(340px, 92vw);
+          max-height: 420px;
+          overflow-y: auto;
+          background: rgba(255,255,255,0.96);
+          backdrop-filter: saturate(180%) blur(20px);
+          -webkit-backdrop-filter: saturate(180%) blur(20px);
+          border: 0.5px solid rgba(0,0,0,0.11);
+          border-radius: 13px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
+          animation: dropIn 0.15s cubic-bezier(0.16,1,0.3,1);
+        }
+        [data-theme="dark"] .tm-notif-dropdown {
+          background: rgba(18,22,34,0.97);
+          border-color: rgba(255,255,255,0.10);
+          box-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.28);
+        }
+
+        .tm-notif-header {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 11px 14px;
+          border-bottom: 0.5px solid rgba(0,0,0,0.07);
+          position: sticky; top: 0;
+          background: inherit;
+        }
+        [data-theme="dark"] .tm-notif-header { border-bottom-color: rgba(255,255,255,0.07); }
+        .tm-notif-title-bar { font-size: 13.5px; font-weight: 500; color: #1d1d1f; }
+        [data-theme="dark"] .tm-notif-title-bar { color: rgba(255,255,255,0.90); }
+
+        .tm-notif-markall {
+          border: none; background: transparent; cursor: pointer;
+          font-family: inherit; font-size: 12px; font-weight: 500;
+          color: #4F46E5;
+        }
+        .tm-notif-markall:hover { text-decoration: underline; }
+        [data-theme="dark"] .tm-notif-markall { color: #818cf8; }
+
+        .tm-notif-list { padding: 4px; }
+        .tm-notif-empty {
+          padding: 26px 14px; text-align: center;
+          font-size: 12.5px; color: #8e8e93;
+        }
+        [data-theme="dark"] .tm-notif-empty { color: rgba(255,255,255,0.38); }
+
+        .tm-notif-item {
+          display: flex; align-items: flex-start;
+          gap: 9px; width: 100%; text-align: left;
+          padding: 10px; border: none; border-radius: 9px;
+          background: transparent; cursor: default;
+          font-family: inherit;
+          transition: background 0.12s;
+        }
+        .tm-notif-item.unread { cursor: pointer; background: rgba(79,70,229,0.06); }
+        .tm-notif-item:hover { background: rgba(0,0,0,0.05); }
+        .tm-notif-item.unread:hover { background: rgba(79,70,229,0.10); }
+        [data-theme="dark"] .tm-notif-item:hover { background: rgba(255,255,255,0.07); }
+        [data-theme="dark"] .tm-notif-item.unread { background: rgba(129,140,248,0.10); }
+        [data-theme="dark"] .tm-notif-item.unread:hover { background: rgba(129,140,248,0.16); }
+
+        .tm-notif-dot {
+          flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%;
+          margin-top: 5px; background: transparent;
+        }
+        .tm-notif-item.unread .tm-notif-dot { background: #4F46E5; }
+        [data-theme="dark"] .tm-notif-item.unread .tm-notif-dot { background: #818cf8; }
+
+        .tm-notif-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .tm-notif-item-title { font-size: 12.5px; font-weight: 600; color: #1d1d1f; }
+        [data-theme="dark"] .tm-notif-item-title { color: rgba(255,255,255,0.90); }
+        .tm-notif-item-msg {
+          font-size: 12px; color: #6e6e73; line-height: 1.4;
+          overflow-wrap: break-word;
+        }
+        [data-theme="dark"] .tm-notif-item-msg { color: rgba(255,255,255,0.50); }
+        .tm-notif-item-time { font-size: 10.5px; color: #aeaeb2; }
+        [data-theme="dark"] .tm-notif-item-time { color: rgba(255,255,255,0.30); }
 
         /* ── User menu ─────────────────────────────────────────────────── */
         .tm-user-wrap { position: relative; }
@@ -510,6 +717,58 @@ export const Navbar = () => {
 
           {/* Right controls */}
           <div className="tm-right">
+            {/* Notifications */}
+            <div className="tm-notif-wrap" ref={notifMenuRef}>
+              <button
+                className="tm-bell-btn"
+                onClick={() => setNotifOpen(v => !v)}
+                aria-label="Notifications"
+                title="Notifications"
+              >
+                <Bell size={16} />
+                {unreadCount > 0 && (
+                  <span className="tm-bell-badge">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {notifOpen && (
+                <div className="tm-notif-dropdown">
+                  <div className="tm-notif-header">
+                    <span className="tm-notif-title-bar">Notifications</span>
+                    {unreadCount > 0 && (
+                      <button className="tm-notif-markall" onClick={markAllNotificationsRead}>
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+                  <div className="tm-notif-list">
+                    {notifLoading ? (
+                      <div className="tm-notif-empty">Loading…</div>
+                    ) : notifications.length === 0 ? (
+                      <div className="tm-notif-empty">No notifications yet</div>
+                    ) : (
+                      notifications.map((n) => (
+                        <button
+                          key={n._id}
+                          className={`tm-notif-item${n.read ? '' : ' unread'}`}
+                          onClick={() => !n.read && markNotificationRead(n._id)}
+                        >
+                          <span className="tm-notif-dot" />
+                          <span className="tm-notif-body">
+                            <span className="tm-notif-item-title">{n.title}</span>
+                            <span className="tm-notif-item-msg">{n.message}</span>
+                            <span className="tm-notif-item-time">{timeAgo(n.createdAt)}</span>
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Theme toggle */}
             <button
               className="tm-theme-toggle"

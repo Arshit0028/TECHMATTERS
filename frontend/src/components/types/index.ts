@@ -74,6 +74,7 @@ export interface Attachment {
 
 export interface Task {
   _id: string;
+  taskNumber?: number;         // auto-assigned by server on creation, stored in DB
   project: Project;
   title: string;
   description: string;

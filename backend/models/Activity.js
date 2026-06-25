@@ -35,6 +35,14 @@ const ActivitySchema = new mongoose.Schema(
     },
     attachments: [attachmentSchema],
     dependencies: [{ type: mongoose.Schema.Types.ObjectId, ref: "Activity" }],
+    // Only meaningful when activityType === "Weekly". Short-day values
+    // (Sun..Sat) selected on the create/edit form — drives which day(s)
+    // this activity shows up / sends a reminder. See utils/reminders.js.
+    reminderDays: {
+      type: [String],
+      enum: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+      default: [],
+    },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },

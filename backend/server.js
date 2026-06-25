@@ -105,6 +105,14 @@ app.use("/api/monthly-reports", require("./routes/monthlyReports"));
 // The regular Tasks page never sees these records.
 app.use("/api/assigned-tasks", require("./routes/assignedTasks")); // ← NEW
 
+// ── New: activity notifications — navbar bell ────────────────────────────────
+// Fires a notification when an activity is created, and lazily generates
+// today's reminder for Daily/Weekly activities the moment this route is
+// hit (see utils/reminders.js for why this is lazy rather than cron-based —
+// short version: Render free tier sleeps the process, so a fixed-time cron
+// can't be trusted to fire).
+app.use("/api/notifications", require("./routes/notifications")); // ← NEW
+
 /* ── 404 ──────────────────────────────────────────────────────────────────── */
 app.use((req, res) => {
   res

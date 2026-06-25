@@ -89,6 +89,13 @@ export const getTask    = (id: string)                 => api.get<Task>(`/tasks/
 export const createTask = (data: FormData)             => api.post('/tasks', data, { headers: { 'Content-Type': 'multipart/form-data' } });
 export const updateTask = (id: string, data: FormData) => api.put(`/tasks/${id}`, data, { headers: { 'Content-Type': 'multipart/form-data' } });
 export const deleteTask = (id: string)                 => api.delete(`/tasks/${id}`);
+// Add these three exports to your existing src/api/client.ts
+// (same pattern as createActivity / updateActivity / getActivity — uses
+// the default `api` axios instance already configured in that file).
+
+export const getNotifications = () => api.get('/notifications');
+export const markNotificationRead = (id: string) => api.put(`/notifications/${id}/read`);
+export const markAllNotificationsRead = () => api.put('/notifications/read-all');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ASSIGNED TASKS  (peer assignment — completely separate from /api/tasks)

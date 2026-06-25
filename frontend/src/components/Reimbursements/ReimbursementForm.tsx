@@ -33,8 +33,8 @@ interface FieldErrors {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_RECEIPTS  = 5;
 const MAX_FILE_MB   = 5;
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/jpg'];
-const ALLOWED_EXT   = ['.jpg', '.jpeg', '.png'];
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+const ALLOWED_EXT   = ['.jpg', '.jpeg', '.png' , '.pdf'];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 

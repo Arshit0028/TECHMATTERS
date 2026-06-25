@@ -87,15 +87,18 @@ export const TaskForm: React.FC = () => {
   const { id }       = useParams<{ id: string }>();
   const navigate     = useNavigate();
 
-  const [projects, setProjects]                     = useState<Project[]>([]);
-  const [loading, setLoading]                       = useState(false);
-  const [initialLoading, setInitialLoading]         = useState(true);
-  const [newAttachments, setNewAttachments]         = useState<File[]>([]);
-  const [existingAttachments, setExistingAttachments] = useState<any[]>([]);
+  const [projects, setProjects]                         = useState<Project[]>([]);
+  const [loading, setLoading]                           = useState(false);
+  const [initialLoading, setInitialLoading]             = useState(true);
+  const [newAttachments, setNewAttachments]             = useState<File[]>([]);
+  const [existingAttachments, setExistingAttachments]   = useState<any[]>([]);
   const [removedAttachmentIds, setRemovedAttachmentIds] = useState<string[]>([]);
-  const [formErrors, setFormErrors]                 = useState<FormErrors>({});
-  const [touched, setTouched]                       = useState<Record<string, boolean>>({});
-  const [formData, setFormData]                     = useState(INITIAL_FORM);
+  const [formErrors, setFormErrors]                     = useState<FormErrors>({});
+  const [touched, setTouched]                           = useState<Record<string, boolean>>({});
+  const [formData, setFormData]                         = useState(INITIAL_FORM);
+
+  // ── DB-persisted task number (read-only, shown in edit header) ─────────────
+  const [taskNumber, setTaskNumber] = useState<number | null>(null);
 
   // ── Load ───────────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -116,6 +119,8 @@ export const TaskForm: React.FC = () => {
           priority:    task.priority  || 'Medium',
           status:      task.status    || 'To Do',
         });
+        // ── Capture the DB task number for display (not editable) ─────────
+        setTaskNumber((task as any).taskNumber ?? null);
         setExistingAttachments(task.attachments || []);
         setNewAttachments([]);
         setRemovedAttachmentIds([]);
@@ -187,7 +192,8 @@ export const TaskForm: React.FC = () => {
     if (formData.endDate)   data.append('endDate',   formData.endDate);
     data.append('priority', formData.priority);
     data.append('status',   formData.status);
-    // ── No assignee field ──────────────────────────────────────────────────
+    // ── No assignee field ─────────────────────────────────────────────────
+    // ── taskNumber is server-generated; never sent from client ────────────
 
     newAttachments.forEach(file => data.append('attachments', file));
     if (id && removedAttachmentIds.length > 0) {
@@ -237,6 +243,21 @@ export const TaskForm: React.FC = () => {
         }
         .field-error { color: #f87171; font-size: 12px; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
         .input-error { border-color: #f87171 !important; }
+
+        /* DB task-number chip shown in edit header */
+        .tf-task-num {
+          font-family: 'JetBrains Mono', 'Fira Mono', monospace;
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          color: rgba(124,58,237,0.85);
+          background: rgba(124,58,237,0.1);
+          border: 1px solid rgba(124,58,237,0.22);
+          border-radius: 8px;
+          padding: 3px 10px;
+          user-select: all;
+          cursor: text;
+        }
       `}</style>
 
       <div className="task-form-root">
@@ -245,10 +266,17 @@ export const TaskForm: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           className="max-w-3xl mx-auto"
         >
+          {/* ── Header ──────────────────────────────────────────────────── */}
           <div className="flex items-center justify-between mb-8">
-            <h1 className="text-3xl font-bold text-white">
-              {id ? 'Edit Task' : 'Create New Task'}
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <h1 className="text-3xl font-bold text-white">
+                {id ? 'Edit Task' : 'Create New Task'}
+              </h1>
+              {/* Show the DB-stored task number when editing */}
+              {id && taskNumber != null && (
+                <span className="tf-task-num">TM{String(taskNumber).padStart(4, '0')}</span>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => navigate('/tasks')}
@@ -288,7 +316,7 @@ export const TaskForm: React.FC = () => {
               />
             </div>
 
-            {/* Project — full width since Assignee is gone */}
+            {/* Project */}
             <div>
               <label className="block text-sm text-zinc-400 mb-2">Project *</label>
               <select
@@ -385,19 +413,10 @@ export const TaskForm: React.FC = () => {
                       >
                         <span className="truncate text-white font-medium flex-1">{att.name}</span>
                         <div className="flex items-center gap-6">
-                          <a
-                            href={att.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-violet-400 hover:text-violet-300 text-xs font-medium"
-                          >
+                          <a href={att.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-violet-400 hover:text-violet-300 text-xs font-medium">
                             <Download size={14} /> View
                           </a>
-                          <button
-                            type="button"
-                            onClick={() => removeExistingAttachment(att._id)}
-                            className="text-red-400 hover:text-red-300 transition-colors"
-                          >
+                          <button type="button" onClick={() => removeExistingAttachment(att._id)} className="text-red-400 hover:text-red-300 transition-colors">
                             <Trash2 size={18} />
                           </button>
                         </div>
@@ -410,13 +429,7 @@ export const TaskForm: React.FC = () => {
               <label className="flex flex-col items-center justify-center w-full px-6 py-8 bg-zinc-800 border border-dashed border-zinc-700 hover:border-violet-500 rounded-3xl text-zinc-400 hover:text-violet-400 cursor-pointer transition-colors">
                 <Upload size={24} className="mb-2" />
                 <span className="text-sm font-medium">Click to upload or drag &amp; drop new files</span>
-                <input
-                  type="file"
-                  multiple
-                  onChange={handleFileChange}
-                  accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx"
-                  className="hidden"
-                />
+                <input type="file" multiple onChange={handleFileChange} accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx" className="hidden" />
               </label>
 
               {newAttachments.length > 0 && (
@@ -433,11 +446,7 @@ export const TaskForm: React.FC = () => {
                         <span className="truncate text-white">{file.name}</span>
                         <span className="text-zinc-500 shrink-0 text-xs">{formatFileSize(file.size)}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeNewAttachment(i)}
-                        className="text-red-400 hover:text-red-300 ml-4 shrink-0 transition-colors"
-                      >
+                      <button type="button" onClick={() => removeNewAttachment(i)} className="text-red-400 hover:text-red-300 ml-4 shrink-0 transition-colors">
                         <Trash2 size={18} />
                       </button>
                     </motion.div>
@@ -453,17 +462,11 @@ export const TaskForm: React.FC = () => {
                 disabled={loading}
                 className="flex-1 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed py-5 rounded-3xl font-semibold text-white flex items-center justify-center gap-3 transition-colors"
               >
-                {loading ? (
-                  <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving...</>
-                ) : (
-                  <><Save size={20} />{id ? 'Update Task' : 'Create Task'}</>
-                )}
+                {loading
+                  ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving...</>
+                  : <><Save size={20} />{id ? 'Update Task' : 'Create Task'}</>}
               </button>
-              <button
-                type="button"
-                onClick={() => navigate('/tasks')}
-                className="flex-1 py-5 border border-zinc-700 hover:bg-zinc-800 rounded-3xl font-medium text-white transition-colors"
-              >
+              <button type="button" onClick={() => navigate('/tasks')} className="flex-1 py-5 border border-zinc-700 hover:bg-zinc-800 rounded-3xl font-medium text-white transition-colors">
                 Cancel
               </button>
             </div>

@@ -466,13 +466,16 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
   const aCols = { 0: 7, 1: 72, 2: 40, 3: 22, 4: 26, 5: 26, 6: 26 };
   const aProjW = CW - Object.values(aCols).reduce((a, b) => a + b, 0);
 
+  // NEW: activities can be daily/recurring (no dates) or scheduled (with dates).
+  // Undated activities now render a clean dash instead of "Not set". The Type
+  // column already carries the daily/weekly/monthly designation.
   const actRows = acts.map((a, i) => [
     String(i + 1),
     a.name              || '—',
     a.activityType      || '—',
     a.priority          || '—',
-    fmtPDF(a.startDate),
-    fmtPDF(a.endDate),
+    fmtPDF(a.startDate, '—'),
+    fmtPDF(a.endDate, '—'),
     a.status            || '—',
     a.project?.name     || '—',
   ]);
@@ -604,14 +607,15 @@ const downloadEmployeePDF = async (report: MonthlyReport) => {
     const naCols = { 0: 7, 1: 66, 2: 30, 3: 28, 4: 20, 5: 26, 6: 26 };
     const naNotesW = CW - Object.values(naCols).reduce((a, b) => a + b, 0);
 
+    // NEW: planned activities without fixed dates (daily/recurring) show a dash.
     const nmActRows = nmActs.map((a, i) => [
       String(i + 1),
       a.name         || '—',
       a.projectName  || '—',
       a.activityType || '—',
       a.priority     || '—',
-      fmtPDF(a.startDate),
-      fmtPDF(a.endDate),
+      fmtPDF(a.startDate, '—'),
+      fmtPDF(a.endDate, '—'),
       a.notes        || '—',
     ]);
 
@@ -1179,6 +1183,7 @@ const ReportDetail: React.FC<{
                       const sc = a.status === 'Completed' ? '#059669' : a.status === 'In Progress' ? '#2563eb' : '#b45309';
                       const sb = a.status === 'Completed' ? 'rgba(5,150,105,0.12)' : a.status === 'In Progress' ? 'rgba(37,99,235,0.12)' : 'rgba(217,119,6,0.12)';
                       const pColor = PRIORITY_COLOR[a.priority] || 'var(--text-4)';
+                      const hasDates = !!(a.startDate || a.endDate);
                       return (
                         <div key={a._id} className="dp-task">
                           <div style={{ width: 8, height: 8, borderRadius: '50%', background: pColor, flexShrink: 0, marginTop: 6 }} />
@@ -1194,6 +1199,7 @@ const ReportDetail: React.FC<{
                               {a.activityType}
                               {a.startDate && ` · ${fmt(a.startDate)}`}
                               {a.endDate   && ` → ${fmt(a.endDate)}`}
+                              {!hasDates && ` · No fixed dates`}
                             </div>
                           </div>
                         </div>
@@ -1229,22 +1235,26 @@ const ReportDetail: React.FC<{
                 )}
                 {nmActs.length > 0 && (
                   <PS icon={<ActivityIcon size={12} />} title="Activity Plan" badge={nmActs.length} accent="#0891b2" defaultOpen>
-                    {nmActs.map((a, i) => (
-                      <div key={i} style={{ background: 'var(--surface-nested)', border: '1px solid var(--border-2)', borderRadius: 10, padding: '11px 12px', marginBottom: 7 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: PRIORITY_COLOR[a.priority] || 'var(--text-4)', flexShrink: 0, display: 'inline-block' }} />
-                          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{a.name}</span>
-                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: (PRIORITY_COLOR[a.priority] || '#94a3b8') + '22', color: PRIORITY_COLOR[a.priority] || 'var(--text-3)', fontWeight: 600 }}>{a.priority}</span>
+                    {nmActs.map((a, i) => {
+                      const hasDates = !!(a.startDate || a.endDate);
+                      return (
+                        <div key={i} style={{ background: 'var(--surface-nested)', border: '1px solid var(--border-2)', borderRadius: 10, padding: '11px 12px', marginBottom: 7 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: PRIORITY_COLOR[a.priority] || 'var(--text-4)', flexShrink: 0, display: 'inline-block' }} />
+                            <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{a.name}</span>
+                            <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 100, background: (PRIORITY_COLOR[a.priority] || '#94a3b8') + '22', color: PRIORITY_COLOR[a.priority] || 'var(--text-3)', fontWeight: 600 }}>{a.priority}</span>
+                          </div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text-4)', fontFamily: 'DM Mono,monospace', paddingLeft: 15, marginBottom: a.notes ? 4 : 0 }}>
+                            {a.activityType && `${a.activityType}`}
+                            {a.projectName  && ` · ${a.projectName}`}
+                            {a.startDate    && ` · ${fmt(a.startDate)}`}
+                            {a.endDate      && ` → ${fmt(a.endDate)}`}
+                            {!hasDates && ` · No fixed dates`}
+                          </div>
+                          {a.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', paddingLeft: 15, lineHeight: 1.5 }}>{a.notes}</div>}
                         </div>
-                        <div style={{ fontSize: 10.5, color: 'var(--text-4)', fontFamily: 'DM Mono,monospace', paddingLeft: 15, marginBottom: a.notes ? 4 : 0 }}>
-                          {a.activityType && `${a.activityType}`}
-                          {a.projectName  && ` · ${a.projectName}`}
-                          {a.startDate    && ` · ${fmt(a.startDate)}`}
-                          {a.endDate      && ` → ${fmt(a.endDate)}`}
-                        </div>
-                        {a.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', paddingLeft: 15, lineHeight: 1.5 }}>{a.notes}</div>}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </PS>
                 )}
                 {(report.nextMonthPlan || []).length === 0 && nmActs.length === 0 && !report.nextMonthFreeText && (
@@ -1477,37 +1487,39 @@ export const AdminReportReview: React.FC = () => {
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@400;500&display=swap');
         .arr-theme-scope, .arr-theme-scope *, .arr-theme-scope *::before, .arr-theme-scope *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        /* LIGHT (default) */
+        /* LIGHT (default) — premium, low-glare palette tuned for readability.
+           Glows are near-invisible, hovers are neutral (no purple wash), accents
+           sit in a calmer indigo, and borders are crisp solid hairlines. */
         .arr-theme-scope[data-theme="light"] {
-          --bg: #f3f4f8;
-          --glow-1: radial-gradient(ellipse 60% 50% at 92% -8%, rgba(124,58,237,0.07) 0%, transparent 60%);
-          --glow-2: radial-gradient(ellipse 50% 45% at 4% 108%, rgba(99,102,241,0.06) 0%, transparent 60%);
+          --bg: #f5f6f8;
+          --glow-1: radial-gradient(ellipse 55% 42% at 95% -12%, rgba(99,102,241,0.04) 0%, transparent 62%);
+          --glow-2: radial-gradient(ellipse 45% 40% at 2% 110%, rgba(91,84,230,0.03) 0%, transparent 62%);
           --surface: #ffffff;
-          --surface-nested: #f7f8fb;
-          --surface-hover: #f6f4ff;
+          --surface-nested: #f7f8fa;
+          --surface-hover: #f4f5f9;
           --solid: #ffffff;
-          --chip: rgba(15,23,42,0.05);
-          --chip-hover: rgba(15,23,42,0.09);
+          --chip: rgba(15,23,42,0.045);
+          --chip-hover: rgba(15,23,42,0.08);
           --track: rgba(15,23,42,0.08);
-          --border: rgba(15,23,42,0.09);
-          --border-2: rgba(15,23,42,0.07);
-          --border-strong: rgba(15,23,42,0.14);
-          --text: #0f172a;
-          --text-2: #334155;
-          --text-3: #64748b;
-          --text-4: #94a3b8;
-          --text-faint: #c2cad6;
-          --accent: #7c3aed;
+          --border: #e6e8ee;
+          --border-2: #edeef3;
+          --border-strong: #d3d8e0;
+          --text: #14161b;
+          --text-2: #3a4150;
+          --text-3: #697083;
+          --text-4: #97a0b0;
+          --text-faint: #c3c9d4;
+          --accent: #5b54e6;
           --accent-2: #6366f1;
-          --accent-text: #6d28d9;
-          --accent-soft: rgba(124,58,237,0.09);
-          --accent-soft-2: rgba(124,58,237,0.16);
-          --accent-border: rgba(124,58,237,0.24);
-          --shadow-card: 0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05);
-          --shadow-panel: -22px 0 60px rgba(15,23,42,0.16);
-          --overlay: rgba(15,23,42,0.32);
+          --accent-text: #4f46e5;
+          --accent-soft: rgba(79,70,229,0.07);
+          --accent-soft-2: rgba(79,70,229,0.13);
+          --accent-border: rgba(79,70,229,0.2);
+          --shadow-card: 0 1px 2px rgba(18,24,40,0.04), 0 6px 20px rgba(18,24,40,0.05);
+          --shadow-panel: -22px 0 60px rgba(18,24,40,0.14);
+          --overlay: rgba(18,24,40,0.30);
           --input-bg: #ffffff;
-          --scrollbar: rgba(15,23,42,0.18);
+          --scrollbar: rgba(15,23,42,0.16);
         }
         /* DARK */
         .arr-theme-scope[data-theme="dark"] {

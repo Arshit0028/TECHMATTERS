@@ -762,17 +762,61 @@ export const EmployeeMonthlyReport: React.FC = () => {
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+        /* ════════════════════════════════════════════════════════════════════
+           PREMIUM PALETTE — scoped to this report only.
+           Light is the default; dark is restored via [data-theme="dark"].
+           This block only re-skins the component — no logic / structure touched.
+           ════════════════════════════════════════════════════════════════════ */
+        .emr-root, .emr-toast {
+          --bg-app:             #f4f5f7;
+          --bg-surface:         #ffffff;
+          --bg-surface-2:       #f7f8fa;
+          --bg-surface-3:       #ebedf1;
+          --text-primary:       #14161b;
+          --text-secondary:     #495063;
+          --text-tertiary:      #818a99;
+          --border-default:     #e4e7ec;
+          --color-primary:      #4f46e5;
+          --color-primary-light:#eef0fe;
+          --shadow-xs: 0 1px 2px rgba(18,24,40,0.04);
+          --shadow-sm: 0 2px 6px rgba(18,24,40,0.06);
+          --shadow-lg: 0 16px 40px rgba(18,24,40,0.13);
+          --radius-lg: 16px;
+        }
+        [data-theme="dark"] .emr-root, [data-theme="dark"] .emr-toast {
+          --bg-app:             #0c0e13;
+          --bg-surface:         #14161d;
+          --bg-surface-2:       #181b23;
+          --bg-surface-3:       #21252f;
+          --text-primary:       #eef0f5;
+          --text-secondary:     #b2bac8;
+          --text-tertiary:      #7b8494;
+          --border-default:     rgba(255,255,255,0.08);
+          --color-primary:      #818cf8;
+          --color-primary-light: rgba(129,140,248,0.14);
+          --shadow-xs: 0 1px 2px rgba(0,0,0,0.30);
+          --shadow-sm: 0 2px 8px rgba(0,0,0,0.35);
+          --shadow-lg: 0 16px 40px rgba(0,0,0,0.50);
+          --radius-lg: 16px;
+        }
+
         /* ── Root ─────────────────────────────────────────────────────────── */
         .emr-root {
           min-height: 100vh;
           background: var(--bg-app);
+          /* calm, barely-there top wash — premium, not glary */
           background-image:
-            radial-gradient(ellipse 75% 55% at 5% -5%, rgba(99,102,241,0.10) 0%, transparent 55%),
-            radial-gradient(ellipse 55% 45% at 95% 100%, rgba(124,58,237,0.07) 0%, transparent 55%);
+            radial-gradient(ellipse 65% 48% at 50% -8%, rgba(79,70,229,0.028) 0%, transparent 62%);
           padding: 2.75rem 1.5rem 7rem;
           font-family: 'DM Sans', sans-serif;
           color: var(--text-primary);
           transition: background 0.35s ease, color 0.35s ease;
+        }
+        /* richer ambient glow only in dark mode */
+        [data-theme="dark"] .emr-root {
+          background-image:
+            radial-gradient(ellipse 75% 55% at 5% -5%, rgba(99,102,241,0.12) 0%, transparent 55%),
+            radial-gradient(ellipse 55% 45% at 95% 100%, rgba(124,58,237,0.10) 0%, transparent 55%);
         }
         .emr-wrap { max-width: 860px; margin: 0 auto; }
 
@@ -790,7 +834,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
         }
         .emr-title em {
           font-style: normal;
-          background: linear-gradient(120deg, var(--color-primary) 20%, #818cf8 80%);
+          background: linear-gradient(120deg, var(--color-primary) 15%, #7c74f0 85%);
           -webkit-background-clip: text; -webkit-text-fill-color: transparent;
           background-clip: text;
         }
@@ -800,34 +844,32 @@ export const EmployeeMonthlyReport: React.FC = () => {
         .emr-topbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 1.75rem; }
 
         .emr-sel {
-          background: var(--bg-surface-2);
+          background: var(--bg-surface);
           border: 1px solid var(--border-default);
           border-radius: 10px; color: var(--text-primary);
           font-family: 'DM Sans', sans-serif; font-size: 13px;
           padding: 9px 32px 9px 12px; outline: none; cursor: pointer;
-          appearance: none; transition: border-color 0.2s;
+          appearance: none; transition: border-color 0.2s, box-shadow 0.2s;
+          box-shadow: var(--shadow-xs);
           background-repeat: no-repeat; background-position: right 10px center;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(100,116,139,0.9)' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
         }
-        /* dark arrow */
-        .emr-sel {
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(100,116,139,0.8)' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-        }
-        .emr-sel:focus { border-color: var(--color-primary); }
-        .emr-sel option { background: var(--bg-surface-2); }
+        .emr-sel:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
+        .emr-sel option { background: var(--bg-surface); color: var(--text-primary); }
 
         .emr-status {
           display: inline-flex; align-items: center; gap: 6px;
           padding: 7px 14px; border-radius: 100px;
-          font-size: 11.5px; font-weight: 500;
+          font-size: 11.5px; font-weight: 600;
         }
         .emr-live {
           display: inline-flex; align-items: center; gap: 5px;
-          font-size: 10px; color: rgba(52,211,153,0.7);
+          font-size: 10px; color: #16a34a;
           font-family: 'DM Mono', monospace; letter-spacing: 0.04em;
         }
         .emr-live-dot {
           width: 6px; height: 6px; border-radius: 50%;
-          background: #34d399; animation: emr-pulse 2s ease-in-out infinite;
+          background: #22c55e; animation: emr-pulse 2s ease-in-out infinite;
         }
         @keyframes emr-pulse {
           0%,100% { opacity: 0.4; transform: scale(0.9); }
@@ -838,8 +880,9 @@ export const EmployeeMonthlyReport: React.FC = () => {
           padding: 7px 13px; border-radius: 10px; font-size: 11.5px;
           font-weight: 500; cursor: pointer;
           border: 1px solid var(--border-default);
-          background: var(--bg-surface-2);
-          color: var(--text-tertiary);
+          background: var(--bg-surface);
+          color: var(--text-secondary);
+          box-shadow: var(--shadow-xs);
           font-family: 'DM Sans', sans-serif; transition: all 0.18s; margin-left: auto;
         }
         .emr-refresh-btn:hover { background: var(--bg-surface-3); color: var(--text-primary); }
@@ -852,9 +895,9 @@ export const EmployeeMonthlyReport: React.FC = () => {
           border: 1px solid var(--border-default);
           border-radius: 14px; padding: 1rem 1.1rem;
           box-shadow: var(--shadow-xs);
-          transition: box-shadow 0.2s;
+          transition: box-shadow 0.2s, transform 0.2s;
         }
-        .emr-stat:hover { box-shadow: var(--shadow-sm); }
+        .emr-stat:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); }
         .emr-stat-val {
           font-family: 'Syne', sans-serif; font-size: 1.7rem;
           font-weight: 800; color: var(--text-primary);
@@ -862,7 +905,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
         }
         .emr-stat-label { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
         .emr-stat-bar {
-          height: 3px; background: var(--border-default);
+          height: 3px; background: var(--bg-surface-3);
           border-radius: 2px; margin-top: 10px; overflow: hidden;
         }
         .emr-stat-fill { height: 100%; border-radius: 2px; transition: width 1s ease; }
@@ -878,30 +921,32 @@ export const EmployeeMonthlyReport: React.FC = () => {
           flex: 1; padding: 9px 14px; border-radius: 9px; border: none;
           background: none; font-family: 'DM Sans', sans-serif;
           font-size: 13px; font-weight: 500;
-          color: var(--text-tertiary);
+          color: var(--text-secondary);
           cursor: pointer; transition: all 0.18s; text-align: center;
         }
         .emr-month-tab.active {
-          background: var(--color-primary-light);
+          background: var(--bg-surface);
           color: var(--color-primary);
-          border: 1px solid var(--color-primary);
+          border: 1px solid var(--border-default);
+          box-shadow: var(--shadow-xs);
         }
         .emr-month-tab:not(.active):hover {
-          color: var(--text-secondary); background: var(--bg-surface-3);
+          color: var(--text-primary); background: var(--bg-surface-3);
         }
         .emr-month-tab-sub {
           font-size: 10px; color: var(--text-tertiary);
           display: block; margin-top: 1px;
           font-family: 'DM Mono', monospace; letter-spacing: 0.04em;
         }
-        .emr-month-tab.active .emr-month-tab-sub { color: var(--color-primary); opacity: 0.75; }
+        .emr-month-tab.active .emr-month-tab-sub { color: var(--color-primary); opacity: 0.7; }
 
         /* ── Section cards ───────────────────────────────────────────────── */
         .emr-sec-card {
           background: var(--bg-surface);
           border: 1px solid var(--border-default);
-          border-radius: 16px; margin-/* ── Section cards (continued) ───────────────────────────────────── */
-        bottom: 10px; overflow: hidden;
+          border-radius: 16px;
+          margin-bottom: 10px;
+          overflow: hidden;
           box-shadow: var(--shadow-xs); transition: box-shadow 0.2s;
         }
         .emr-sec-card:hover { box-shadow: var(--shadow-sm); }
@@ -915,11 +960,11 @@ export const EmployeeMonthlyReport: React.FC = () => {
           display: flex; align-items: center; gap: 8px;
           font-family: 'DM Mono', monospace; font-size: 10px;
           letter-spacing: 0.12em; text-transform: uppercase;
-          color: var(--text-tertiary);
+          color: var(--text-secondary);
         }
         .emr-sec-badge {
           font-size: 10px; padding: 2px 8px; border-radius: 100px;
-          font-weight: 500; letter-spacing: 0;
+          font-weight: 600; letter-spacing: 0;
           font-family: 'DM Sans', sans-serif;
         }
         .emr-sec-body { padding: 0 1.2rem 1.2rem; }
@@ -936,7 +981,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
           color: var(--text-tertiary);
           transition: color 0.15s; margin-top: 2px;
         }
-        .emr-task-check.done { color: #10b981; }
+        .emr-task-check.done { color: #059669; }
         .emr-task-check.saving { opacity: 0.4; cursor: wait; }
         .emr-task-check:not(.saving):hover { color: var(--text-secondary); }
         .emr-task-title {
@@ -961,11 +1006,11 @@ export const EmployeeMonthlyReport: React.FC = () => {
           border-radius: 9px; color: var(--text-primary);
           font-family: 'DM Sans', sans-serif; font-size: 12px;
           padding: 8px 11px; resize: none; outline: none;
-          transition: border-color 0.2s;
+          transition: border-color 0.2s, box-shadow 0.2s;
         }
-        .emr-task-note-area:focus { border-color: var(--color-primary); }
+        .emr-task-note-area:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.10); }
         .emr-task-note-area::placeholder { color: var(--text-tertiary); }
-        .emr-task-note-area:disabled { opacity: 0.5; cursor: not-allowed; }
+        .emr-task-note-area:disabled { opacity: 0.55; cursor: not-allowed; }
 
         /* ── Activity rows ───────────────────────────────────────────────── */
         .emr-act-row {
@@ -982,7 +1027,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
         }
         .emr-act-badge {
           font-size: 10px; padding: 2px 8px;
-          border-radius: 100px; font-weight: 500; white-space: nowrap;
+          border-radius: 100px; font-weight: 600; white-space: nowrap;
         }
 
         /* ── Assigned tasks rows ─────────────────────────────────────────── */
@@ -1029,42 +1074,42 @@ export const EmployeeMonthlyReport: React.FC = () => {
           border: 1px solid var(--border-default);
           border-radius: 9px; color: var(--text-primary);
           font-family: 'DM Sans', sans-serif; font-size: 13px;
-          padding: 8px 11px; outline: none; transition: border-color 0.2s;
+          padding: 8px 11px; outline: none; transition: border-color 0.2s, box-shadow 0.2s;
         }
-        .emr-plan-inp:focus { border-color: var(--color-primary); }
+        .emr-plan-inp:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.10); }
         .emr-plan-inp::placeholder { color: var(--text-tertiary); }
-        .emr-plan-inp:disabled { opacity: 0.5; cursor: not-allowed; }
+        .emr-plan-inp:disabled { opacity: 0.55; cursor: not-allowed; }
         .emr-plan-sel {
           width: 100%; background: var(--bg-surface);
           border: 1px solid var(--border-default);
           border-radius: 9px; color: var(--text-primary);
           font-family: 'DM Sans', sans-serif; font-size: 13px;
           padding: 8px 11px; outline: none; cursor: pointer;
-          appearance: none; transition: border-color 0.2s;
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(100,116,139,0.8)' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+          appearance: none; transition: border-color 0.2s, box-shadow 0.2s;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(100,116,139,0.9)' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
           background-repeat: no-repeat; background-position: right 10px center;
         }
-        .emr-plan-sel:focus { border-color: var(--color-primary); }
-        .emr-plan-sel option { background: var(--bg-surface-2); }
-        .emr-plan-sel:disabled { opacity: 0.5; cursor: not-allowed; }
+        .emr-plan-sel:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.10); }
+        .emr-plan-sel option { background: var(--bg-surface); color: var(--text-primary); }
+        .emr-plan-sel:disabled { opacity: 0.55; cursor: not-allowed; }
         .emr-plan-notes-area {
           width: 100%; background: var(--bg-surface);
           border: 1px solid var(--border-default);
           border-radius: 9px; color: var(--text-primary);
           font-family: 'DM Sans', sans-serif; font-size: 12px;
           padding: 8px 11px; resize: none; outline: none;
-          transition: border-color 0.2s;
+          transition: border-color 0.2s, box-shadow 0.2s;
         }
-        .emr-plan-notes-area:focus { border-color: var(--color-primary); }
+        .emr-plan-notes-area:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.10); }
         .emr-plan-notes-area::placeholder { color: var(--text-tertiary); }
-        .emr-plan-notes-area:disabled { opacity: 0.5; }
+        .emr-plan-notes-area:disabled { opacity: 0.55; }
         .emr-plan-del {
           position: absolute; top: 10px; right: 11px;
           background: none; border: none; color: var(--text-tertiary);
           cursor: pointer; display: flex; transition: all 0.15s;
           padding: 3px; border-radius: 5px;
         }
-        .emr-plan-del:hover { color: #ef4444; background: rgba(239,68,68,0.08); }
+        .emr-plan-del:hover { color: #dc2626; background: rgba(220,38,38,0.08); }
 
         /* ── Reimbursement rows ──────────────────────────────────────────── */
         .emr-reimb-row {
@@ -1073,53 +1118,52 @@ export const EmployeeMonthlyReport: React.FC = () => {
         }
         .emr-reimb-row:last-child { border-bottom: none; }
         .emr-reimb-name { flex: 1; font-size: 13px; color: var(--text-primary); }
-        .emr-reimb-amt { font-size: 12px; color: var(--text-tertiary); font-family: 'DM Mono', monospace; }
+        .emr-reimb-amt { font-size: 12px; color: var(--text-secondary); font-family: 'DM Mono', monospace; }
         .emr-reimb-btn {
           display: flex; align-items: center; gap: 4px;
           padding: 4px 10px; border-radius: 7px;
-          font-size: 11px; font-weight: 500; cursor: pointer; border: 1px solid;
+          font-size: 11px; font-weight: 600; cursor: pointer; border: 1px solid;
           font-family: 'DM Sans', sans-serif; transition: all 0.15s;
         }
         .emr-reimb-link {
           background: var(--color-primary-light);
-          border-color: var(--color-primary);
+          border-color: rgba(79,70,229,0.3);
           color: var(--color-primary);
         }
-        .emr-reimb-link:hover { opacity: 0.8; }
+        .emr-reimb-link:hover { background: #e4e6fd; }
         .emr-reimb-unlink {
-          background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.25);
-          color: #ef4444;
+          background: rgba(220,38,38,0.07); border-color: rgba(220,38,38,0.25);
+          color: #dc2626;
         }
-        .emr-reimb-unlink:hover { background: rgba(239,68,68,0.15); }
+        .emr-reimb-unlink:hover { background: rgba(220,38,38,0.14); }
 
         /* ── Free text ───────────────────────────────────────────────────── */
         .emr-freetext {
-          width: 100%; background: var(--bg-surface-2);
+          width: 100%; background: var(--bg-surface);
           border: 1px solid var(--border-default);
           border-radius: 10px; color: var(--text-primary);
           font-family: 'DM Sans', sans-serif; font-size: 13px;
           padding: 10px 13px; resize: none; outline: none;
-          margin-top: 10px; transition: border-color 0.2s;
+          margin-top: 10px; transition: border-color 0.2s, box-shadow 0.2s;
         }
-        .emr-freetext:focus { border-color: var(--color-primary); }
-        .emr-freetext:disabled { opacity: 0.5; cursor: not-allowed; }
+        .emr-freetext:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(79,70,229,0.10); }
+        .emr-freetext:disabled { opacity: 0.55; cursor: not-allowed; }
         .emr-freetext::placeholder { color: var(--text-tertiary); }
 
         /* ── Feedback / rejection boxes ──────────────────────────────────── */
         .emr-feedback-box {
           background: var(--color-primary-light);
-          border: 1px solid var(--color-primary);
+          border: 1px solid rgba(79,70,229,0.25);
           border-radius: 14px; padding: 1rem 1.2rem; margin-bottom: 1rem;
-          opacity: 0.9;
         }
         .emr-feedback-label {
           font-size: 9.5px; font-family: 'DM Mono', monospace;
           letter-spacing: 0.1em; text-transform: uppercase;
-          color: var(--color-primary); margin-bottom: 8px;
+          color: var(--color-primary); margin-bottom: 8px; font-weight: 500;
         }
         .emr-rejection-box {
-          background: rgba(239,68,68,0.06);
-          border: 1px solid rgba(239,68,68,0.2);
+          background: rgba(220,38,38,0.05);
+          border: 1px solid rgba(220,38,38,0.22);
           border-radius: 14px; padding: 1rem 1.2rem;
           margin-bottom: 1rem; display: flex; gap: 10px;
         }
@@ -1132,39 +1176,40 @@ export const EmployeeMonthlyReport: React.FC = () => {
           font-family: 'DM Sans', sans-serif;
           cursor: pointer; border: none; transition: all 0.2s;
         }
-        .emr-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
+        .emr-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
         .emr-btn-primary {
           background: linear-gradient(135deg, var(--color-primary), #6366f1);
-          color: #fff; box-shadow: 0 4px 18px rgba(79,70,229,0.28);
+          color: #fff; box-shadow: 0 4px 16px rgba(79,70,229,0.24);
         }
         .emr-btn-primary:hover:not(:disabled) {
           transform: translateY(-1px);
-          box-shadow: 0 6px 24px rgba(79,70,229,0.42);
+          box-shadow: 0 6px 22px rgba(79,70,229,0.34);
         }
         .emr-btn-ghost {
-          background: var(--bg-surface-2);
+          background: var(--bg-surface);
           color: var(--text-secondary);
           border: 1px solid var(--border-default) !important;
+          box-shadow: var(--shadow-xs);
         }
         .emr-btn-ghost:hover:not(:disabled) {
           background: var(--bg-surface-3);
           color: var(--text-primary);
         }
         .emr-btn-save {
-          background: rgba(16,185,129,0.1);
-          color: #10b981;
-          border: 1px solid rgba(16,185,129,0.25) !important;
+          background: rgba(5,150,105,0.10);
+          color: #047857;
+          border: 1px solid rgba(5,150,105,0.28) !important;
         }
-        .emr-btn-save:hover:not(:disabled) { background: rgba(16,185,129,0.18); }
+        .emr-btn-save:hover:not(:disabled) { background: rgba(5,150,105,0.18); }
 
         /* ── Error / empty ───────────────────────────────────────────────── */
         .emr-error-box {
           display: flex; align-items: flex-start; gap: 8px;
-          background: rgba(239,68,68,0.06);
-          border: 1px solid rgba(239,68,68,0.18);
-          border-left: 4px solid #ef4444;
+          background: rgba(220,38,38,0.05);
+          border: 1px solid rgba(220,38,38,0.18);
+          border-left: 4px solid #dc2626;
           border-radius: 11px; padding: 11px 14px;
-          color: #ef4444; font-size: 13px; margin-bottom: 1rem;
+          color: #b91c1c; font-size: 13px; margin-bottom: 1rem;
         }
         .emr-empty-state {
           text-align: center; padding: 2.5rem 0;
@@ -1269,10 +1314,10 @@ export const EmployeeMonthlyReport: React.FC = () => {
               {report && (
                 <div className="emr-stats">
                   {[
-                    { label: 'Tasks Done',     val: `${tasksDone}/${tasksTotal}`, fill: taskPct,  color: taskPct >= 70 ? '#10b981' : taskPct >= 40 ? '#f59e0b' : '#ef4444', showBar: true },
-                    { label: 'Activities',     val: `${actDone}/${activities.length}`, fill: activities.length ? Math.round(actDone / activities.length * 100) : 0, color: '#3b82f6', showBar: true },
+                    { label: 'Tasks Done',     val: `${tasksDone}/${tasksTotal}`, fill: taskPct,  color: taskPct >= 70 ? '#059669' : taskPct >= 40 ? '#d97706' : '#dc2626', showBar: true },
+                    { label: 'Activities',     val: `${actDone}/${activities.length}`, fill: activities.length ? Math.round(actDone / activities.length * 100) : 0, color: '#2563eb', showBar: true },
                     { label: 'Next Plans',     val: String(planItems.length), fill: 0, color: 'var(--color-primary)', showBar: false },
-                    { label: 'Reimbursements', val: `₹${reimbTotal.toLocaleString('en-IN')}`, fill: 0, color: '#f97316', showBar: false },
+                    { label: 'Reimbursements', val: `₹${reimbTotal.toLocaleString('en-IN')}`, fill: 0, color: '#ea580c', showBar: false },
                   ].map((s, i) => (
                     <motion.div key={s.label} className="emr-stat" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16 + i * 0.06 }}>
                       <div className="emr-stat-val" style={{ color: s.color }}>{s.val}</div>
@@ -1297,12 +1342,12 @@ export const EmployeeMonthlyReport: React.FC = () => {
               {/* ── Rejection note ────────────────────────────────────── */}
               {report?.status === 'rejected' && report.rejectionNote && (
                 <div className="emr-rejection-box" role="alert">
-                  <AlertCircle size={15} color="#ef4444" style={{ flexShrink: 0, marginTop: 2 }} />
+                  <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 2 }} />
                   <div>
-                    <div style={{ fontSize: 10, fontFamily: 'DM Mono, monospace', color: '#ef4444', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>
+                    <div style={{ fontSize: 10, fontFamily: 'DM Mono, monospace', color: '#dc2626', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>
                       Returned for revision
                     </div>
-                    <div style={{ fontSize: 13, color: '#fca5a5' }}>{report.rejectionNote}</div>
+                    <div style={{ fontSize: 13, color: '#b91c1c' }}>{report.rejectionNote}</div>
                   </div>
                 </div>
               )}
@@ -1323,7 +1368,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                     <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{report.adminRemarks}</div>
                   )}
                   {report.status === 'approved' && typeof report.adminScore === 'number' && (
-                    <div style={{ marginTop: 8, fontSize: '2rem', fontFamily: 'Syne, sans-serif', fontWeight: 800, color: '#10b981', letterSpacing: '-0.04em' }}>
+                    <div style={{ marginTop: 8, fontSize: '2rem', fontFamily: 'Syne, sans-serif', fontWeight: 800, color: '#059669', letterSpacing: '-0.04em' }}>
                       {report.adminScore}
                       <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--text-tertiary)', marginLeft: 3 }}>/100</span>
                     </div>
@@ -1374,7 +1419,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                         {prevReport.status === 'approved' && typeof prevReport.adminScore === 'number' && (
                           <div className="emr-feedback-box" style={{ marginBottom: 10 }}>
                             <div className="emr-feedback-label">Score</div>
-                            <div style={{ fontSize: '1.8rem', fontFamily: 'Syne, sans-serif', fontWeight: 800, color: '#10b981' }}>
+                            <div style={{ fontSize: '1.8rem', fontFamily: 'Syne, sans-serif', fontWeight: 800, color: '#059669' }}>
                               {prevReport.adminScore}
                               <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--text-tertiary)', marginLeft: 3 }}>/100</span>
                             </div>
@@ -1384,12 +1429,12 @@ export const EmployeeMonthlyReport: React.FC = () => {
                           </div>
                         )}
 
-                        <Section icon={<CheckSquare size={13} />} title="Tasks Completed" badge={`${prevReport.tasks.filter(t => t.isDone).length}/${prevReport.tasks.length}`} accent="#10b981">
+                        <Section icon={<CheckSquare size={13} />} title="Tasks Completed" badge={`${prevReport.tasks.filter(t => t.isDone).length}/${prevReport.tasks.length}`} accent="#059669">
                           {prevReport.tasks.length === 0 ? (
                             <div className="emr-empty-state"><Square size={24} style={{ color: 'var(--text-tertiary)' }} /><span>No tasks</span></div>
                           ) : prevReport.tasks.map(t => (
                             <div key={t._id} className="emr-prev-task">
-                              <span style={{ color: t.isDone ? '#10b981' : 'var(--text-tertiary)', flexShrink: 0 }}>
+                              <span style={{ color: t.isDone ? '#059669' : 'var(--text-tertiary)', flexShrink: 0 }}>
                                 {t.isDone ? <CheckSquare size={15} /> : <Square size={15} />}
                               </span>
                               <div style={{ flex: 1, minWidth: 0 }}>
@@ -1402,7 +1447,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                                   {t.endDate   && ` → ${fmt(t.endDate)}`}
                                 </div>
                                 {(t.doneNote || t.undoneNote) && (
-                                  <div style={{ fontSize: 11.5, color: t.isDone ? '#10b981' : '#f87171', marginTop: 3, fontStyle: 'italic' }}>
+                                  <div style={{ fontSize: 11.5, color: t.isDone ? '#059669' : '#dc2626', marginTop: 3, fontStyle: 'italic' }}>
                                     {t.isDone ? t.doneNote : t.undoneNote}
                                   </div>
                                 )}
@@ -1432,7 +1477,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                         )}
 
                         {prevReport.managerRemarks && (
-                          <Section icon={<FileText size={13} />} title="Manager Remarks" accent="#f59e0b" defaultOpen={false}>
+                          <Section icon={<FileText size={13} />} title="Manager Remarks" accent="#d97706" defaultOpen={false}>
                             <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{prevReport.managerRemarks}</div>
                           </Section>
                         )}
@@ -1464,7 +1509,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                     ) : (
                       <>
                         {/* ── Project Tasks ──────────────────────────── */}
-                        <Section icon={<CheckSquare size={13} />} title="This Month's Tasks" badge={`${tasksDone}/${tasksTotal} done`} accent="#10b981">
+                        <Section icon={<CheckSquare size={13} />} title="This Month's Tasks" badge={`${tasksDone}/${tasksTotal} done`} accent="#059669">
                           {report.tasks.length === 0 ? (
                             <div className="emr-empty-state">
                               <Square size={28} style={{ color: 'var(--text-tertiary)' }} />
@@ -1511,13 +1556,13 @@ export const EmployeeMonthlyReport: React.FC = () => {
                                     </div>
                                   ) : (
                                     <div>
-                                      <div className="emr-task-note-label" style={{ color: '#ef4444' }}>Explain why incomplete *</div>
+                                      <div className="emr-task-note-label" style={{ color: '#dc2626' }}>Explain why incomplete *</div>
                                       <textarea
                                         className="emr-task-note-area" rows={2} disabled={!canEdit}
                                         key={`undone-${task._id}-${task.isDone}`}
                                         defaultValue={task.undoneNote}
                                         placeholder="Reason / blockers…"
-                                        style={{ borderColor: task.undoneNote?.trim() ? undefined : 'rgba(239,68,68,0.3)' }}
+                                        style={{ borderColor: task.undoneNote?.trim() ? undefined : 'rgba(220,38,38,0.35)' }}
                                         onBlur={e => saveTaskNote(task, 'undoneNote', e.target.value)}
                                       />
                                     </div>
@@ -1533,7 +1578,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                           icon={<ListChecks size={13} />}
                           title="Tasks Assigned to Me"
                           badge={`${assignedTasks.length} task${assignedTasks.length !== 1 ? 's' : ''}`}
-                          accent="#6366f1"
+                          accent="#4f46e5"
                           defaultOpen={assignedTasks.length > 0}
                         >
                           {assignedTasks.length === 0 ? (
@@ -1546,8 +1591,8 @@ export const EmployeeMonthlyReport: React.FC = () => {
                             </div>
                           ) : assignedTasks.map(at => {
                             const statusColor =
-                              at.status === 'Done'        ? '#10b981' :
-                              at.status === 'In Progress' ? '#f59e0b' : 'var(--text-tertiary)';
+                              at.status === 'Done'        ? '#059669' :
+                              at.status === 'In Progress' ? '#d97706' : 'var(--text-tertiary)';
                             const priorityColor = PRIORITY_COLOR[at.priority] || '#94a3b8';
                             return (
                               <div key={at._id} className="emr-at-row">
@@ -1567,7 +1612,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                                     <span className="emr-at-badge" style={{ background: priorityColor + '18', color: priorityColor }}>
                                       {at.priority}
                                     </span>
-                                    <span className="emr-at-badge" style={{ background: 'rgba(99,102,241,0.12)', color: '#6366f1' }}>
+                                    <span className="emr-at-badge" style={{ background: 'rgba(79,70,229,0.10)', color: '#4f46e5' }}>
                                       ✓ Approved
                                     </span>
                                   </div>
@@ -1578,15 +1623,15 @@ export const EmployeeMonthlyReport: React.FC = () => {
                         </Section>
 
                         {/* ── Activities ─────────────────────────────── */}
-                        <Section icon={<ActivityIcon size={13} />} title="My Activities This Month" badge={`${actDone}/${activities.length}`} accent="#3b82f6">
+                        <Section icon={<ActivityIcon size={13} />} title="My Activities This Month" badge={`${actDone}/${activities.length}`} accent="#2563eb">
                           {activities.length === 0 ? (
                             <div className="emr-empty-state">
                               <ActivityIcon size={26} style={{ color: 'var(--text-tertiary)' }} />
                               <span>No activities for this month</span>
                             </div>
                           ) : activities.map(a => {
-                            const sc = a.status === 'Completed' ? '#10b981' : a.status === 'In Progress' ? '#3b82f6' : '#f59e0b';
-                            const sb = a.status === 'Completed' ? 'rgba(16,185,129,0.12)' : a.status === 'In Progress' ? 'rgba(59,130,246,0.12)' : 'rgba(245,158,11,0.12)';
+                            const sc = a.status === 'Completed' ? '#059669' : a.status === 'In Progress' ? '#2563eb' : '#d97706';
+                            const sb = a.status === 'Completed' ? 'rgba(5,150,105,0.12)' : a.status === 'In Progress' ? 'rgba(37,99,235,0.12)' : 'rgba(217,119,6,0.12)';
                             return (
                               <div key={a._id} className="emr-act-row">
                                 <div className="emr-act-dot" style={{ background: PRIORITY_COLOR[a.priority] || '#94a3b8' }} />
@@ -1607,7 +1652,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                         </Section>
 
                         {/* ── Reimbursements ─────────────────────────── */}
-                        <Section icon={<Receipt size={13} />} title="Reimbursements" badge={`${(report.reimbursements || []).length} linked`} accent="#f97316" defaultOpen={false}>
+                        <Section icon={<Receipt size={13} />} title="Reimbursements" badge={`${(report.reimbursements || []).length} linked`} accent="#ea580c" defaultOpen={false}>
                           {(report.reimbursements as Reimbursement[]).length > 0 && (
                             <>
                               <div style={{ fontSize: 9.5, fontFamily: 'DM Mono, monospace', color: 'var(--text-tertiary)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
@@ -1617,7 +1662,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                                 <div key={r._id} className="emr-reimb-row">
                                   <div className="emr-reimb-name">{r.title}</div>
                                   <span className="emr-reimb-amt">₹{r.amount.toLocaleString('en-IN')}</span>
-                                  <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 7px', borderRadius: 100, background: r.status === 'Approved' ? 'rgba(16,185,129,0.12)' : r.status === 'Rejected' ? 'rgba(239,68,68,0.12)' : r.status === 'Paid' ? 'rgba(59,130,246,0.12)' : 'rgba(245,158,11,0.12)', color: r.status === 'Approved' ? '#10b981' : r.status === 'Rejected' ? '#ef4444' : r.status === 'Paid' ? '#3b82f6' : '#f59e0b', marginRight: 6 }}>{r.status}</span>
+                                  <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 100, background: r.status === 'Approved' ? 'rgba(5,150,105,0.12)' : r.status === 'Rejected' ? 'rgba(220,38,38,0.12)' : r.status === 'Paid' ? 'rgba(37,99,235,0.12)' : 'rgba(217,119,6,0.12)', color: r.status === 'Approved' ? '#059669' : r.status === 'Rejected' ? '#dc2626' : r.status === 'Paid' ? '#2563eb' : '#d97706', marginRight: 6 }}>{r.status}</span>
                                   {canEdit && <button className="emr-reimb-btn emr-reimb-unlink" onClick={() => unlinkReimb(r._id)}><X size={10} /> Remove</button>}
                                 </div>
                               ))}
@@ -1632,7 +1677,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                                 <div key={r._id} className="emr-reimb-row">
                                   <div className="emr-reimb-name">{r.title}</div>
                                   <span className="emr-reimb-amt">₹{r.amount.toLocaleString('en-IN')}</span>
-                                  <span style={{ fontSize: 10, fontWeight: 500, padding: '2px 7px', borderRadius: 100, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', marginRight: 6 }}>{r.status}</span>
+                                  <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 100, background: 'rgba(217,119,6,0.12)', color: '#d97706', marginRight: 6 }}>{r.status}</span>
                                   <button className="emr-reimb-btn emr-reimb-link" onClick={() => linkReimb(r)}><Plus size={10} /> Link</button>
                                 </div>
                               ))}
@@ -1645,7 +1690,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                             </div>
                           )}
                           {reimbTotal > 0 && (
-                            <div style={{ marginTop: 10, padding: '8px 11px', background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.2)', borderRadius: 9, fontSize: 13, color: '#f97316', fontWeight: 600 }}>
+                            <div style={{ marginTop: 10, padding: '8px 11px', background: 'rgba(234,88,12,0.08)', border: '1px solid rgba(234,88,12,0.22)', borderRadius: 9, fontSize: 13, color: '#ea580c', fontWeight: 600 }}>
                               Total: ₹{reimbTotal.toLocaleString('en-IN')}
                             </div>
                           )}
@@ -1676,7 +1721,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                             </div>
                           )}
                           {report.status === 'approved' && (
-                            <div style={{ fontSize: 13, color: '#10b981', display: 'flex', alignItems: 'center', gap: 7 }}>
+                            <div style={{ fontSize: 13, color: '#059669', display: 'flex', alignItems: 'center', gap: 7 }}>
                               <CheckCircle2 size={14} /> Approved — score: {report.adminScore}/100
                             </div>
                           )}
@@ -1791,7 +1836,7 @@ export const EmployeeMonthlyReport: React.FC = () => {
                               {saving ? 'Saving…' : 'Save Plan'}
                             </button>
                             {planDirty && (
-                              <span style={{ fontSize: 11.5, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'DM Mono, monospace' }}>
+                              <span style={{ fontSize: 11.5, color: '#d97706', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'DM Mono, monospace' }}>
                                 ● Unsaved changes
                               </span>
                             )}
