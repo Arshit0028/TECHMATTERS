@@ -28,9 +28,14 @@ const ActivitySchema = new mongoose.Schema(
       enum: ["Low", "Medium", "High"],
       default: "Medium",
     },
+    // "Submitted" added on top of existing values — once an activity is
+    // Submitted (to manager) or Completed, the frontend disables editing.
+    // No existing records are affected since this is purely additive to
+    // the enum; default behavior for Pending/In Progress/Completed is
+    // unchanged.
     status: {
       type: String,
-      enum: ["Pending", "In Progress", "Completed"],
+      enum: ["Pending", "In Progress", "Submitted", "Completed"],
       default: "Pending",
     },
     attachments: [attachmentSchema],

@@ -36,6 +36,30 @@ function useDebounce<T>(value: T, delay = 400): T {
   return debounced;
 }
 
+// ─── Responsive breakpoint (JS-based, not CSS) ─────────────────────────────────
+// Replaces the old .tl-desktop/.tl-mobile CSS show/hide pattern, which could
+// render BOTH layouts into the DOM simultaneously if the injected <style>
+// tag's rules didn't apply (e.g. cascade/order issues) — that was the root
+// cause of the "task list shown twice" bug. Conditionally rendering only one
+// layout in JS makes that class of bug impossible: only one ever mounts.
+const DESKTOP_BREAKPOINT = 768;
+
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(
+    typeof window !== 'undefined' ? window.innerWidth >= DESKTOP_BREAKPOINT : true,
+  );
+
+  useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= DESKTOP_BREAKPOINT);
+    window.addEventListener('resize', handleResize);
+    // Run once on mount too, in case the initial SSR/first-paint guess was wrong.
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return isDesktop;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const extractProjects = (res: any): Project[] => {
   if (!res) return [];
@@ -95,6 +119,7 @@ export const TaskList: React.FC = () => {
 
   const navigate = useNavigate();
   const { user } = useAuth();
+  const isDesktop = useIsDesktop();
 
   const canCreate = usePermission('tasks', 'create') ||
     ['super-admin', 'admin'].includes(user?.accessLevel || '');
@@ -251,10 +276,6 @@ export const TaskList: React.FC = () => {
         }
         @keyframes tl-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-        .tl-desktop { display: none; }
-        .tl-mobile  { display: block; }
-        @media (min-width: 768px) { .tl-desktop { display: block; } .tl-mobile { display: none; } }
-
         .tl-rule { height: 1px; background: rgba(255,255,255,0.06); margin: 12px 0; }
 
         .tl-stat {
@@ -285,19 +306,20 @@ export const TaskList: React.FC = () => {
             </div>
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button
-                className="tl-mobile"
-                onClick={() => setShowFilters(v => !v)}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '9px 14px', borderRadius: 12, fontSize: 13, fontWeight: 500,
-                  color: hasActiveFilters ? '#a78bfa' : 'rgba(255,255,255,0.55)',
-                  background: hasActiveFilters ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.05)',
-                  border: `1px solid ${hasActiveFilters ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.08)'}`,
-                }}
-              >
-                <Filter size={14} /> {hasActiveFilters ? 'Filtered' : 'Filter'}
-              </button>
+              {!isDesktop && (
+                <button
+                  onClick={() => setShowFilters(v => !v)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '9px 14px', borderRadius: 12, fontSize: 13, fontWeight: 500,
+                    color: hasActiveFilters ? '#a78bfa' : 'rgba(255,255,255,0.55)',
+                    background: hasActiveFilters ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.05)',
+                    border: `1px solid ${hasActiveFilters ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                  }}
+                >
+                  <Filter size={14} /> {hasActiveFilters ? 'Filtered' : 'Filter'}
+                </button>
+              )}
 
               {canCreate && (
                 <motion.button
@@ -319,76 +341,84 @@ export const TaskList: React.FC = () => {
           </div>
 
           {/* ── Desktop filters ─────────────────────────────────────────── */}
-          <div className="tl-desktop" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-            <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 0 }}>
-              <Search size={14} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.28)', pointerEvents: 'none' }} />
-              <input
-                placeholder="Search tasks…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                className="tl-input"
-                style={{ width: '100%', paddingLeft: 36, paddingRight: searchTerm ? 34 : 14, paddingTop: 9, paddingBottom: 9, fontSize: 13 }}
-              />
-              {searchTerm && (
-                <button onClick={() => setSearchTerm('')} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.28)', lineHeight: 0, background: 'none' }}>
-                  <X size={13} />
-                </button>
+          {isDesktop && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
+              <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 0 }}>
+                <Search size={14} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.28)', pointerEvents: 'none' }} />
+                <input
+                  placeholder="Search tasks…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                  className="tl-input"
+                  style={{ width: '100%', paddingLeft: 36, paddingRight: searchTerm ? 34 : 14, paddingTop: 9, paddingBottom: 9, fontSize: 13 }}
+                />
+                {searchTerm && (
+                  <button onClick={() => setSearchTerm('')} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.28)', lineHeight: 0, background: 'none' }}>
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+              <select value={filterProject} onChange={e => setFilterProject(e.target.value)} className="tl-input" style={{ padding: '9px 12px', fontSize: 13, flex: '0 1 180px', minWidth: 140 }}>
+                <option value="">All Projects</option>
+                {projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
+              </select>
+              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="tl-input" style={{ padding: '9px 12px', fontSize: 13, flex: '0 1 150px', minWidth: 120 }}>
+                <option value="">All Status</option>
+                <option value="To Do">To Do</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Review">Review</option>
+                <option value="Done">Done</option>
+              </select>
+              {hasActiveFilters && (
+                <motion.button initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} onClick={clearFilters}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '9px 12px', fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.38)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, background: 'transparent' }}
+                >
+                  <X size={12} /> Clear
+                </motion.button>
               )}
             </div>
-            <select value={filterProject} onChange={e => setFilterProject(e.target.value)} className="tl-input" style={{ padding: '9px 12px', fontSize: 13, flex: '0 1 180px', minWidth: 140 }}>
-              <option value="">All Projects</option>
-              {projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
-            </select>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="tl-input" style={{ padding: '9px 12px', fontSize: 13, flex: '0 1 150px', minWidth: 120 }}>
-              <option value="">All Status</option>
-              <option value="To Do">To Do</option>
-              <option value="In Progress">In Progress</option>
-              <option value="Review">Review</option>
-              <option value="Done">Done</option>
-            </select>
-            {hasActiveFilters && (
-              <motion.button initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} onClick={clearFilters}
-                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '9px 12px', fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.38)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, background: 'transparent' }}
-              >
-                <X size={12} /> Clear
-              </motion.button>
-            )}
-          </div>
+          )}
 
           {/* ── Mobile filter panel ──────────────────────────────────────── */}
-          <AnimatePresence>
-            {showFilters && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden' }} className="tl-mobile">
-                <div className="tl-filter-panel">
-                  <div style={{ position: 'relative' }}>
-                    <Search size={13} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.28)', pointerEvents: 'none' }} />
-                    <input placeholder="Search tasks…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="tl-input"
-                      style={{ width: '100%', paddingLeft: 33, paddingRight: searchTerm ? 32 : 12, paddingTop: 9, paddingBottom: 9, fontSize: 13, boxSizing: 'border-box' }} />
-                    {searchTerm && <button onClick={() => setSearchTerm('')} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.3)', lineHeight: 0, background: 'none' }}><X size={13} /></button>}
+          {!isDesktop && (
+            <AnimatePresence>
+              {showFilters && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden' }}>
+                  <div className="tl-filter-panel">
+                    <div style={{ position: 'relative' }}>
+                      <Search size={13} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.28)', pointerEvents: 'none' }} />
+                      <input placeholder="Search tasks…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="tl-input"
+                        style={{ width: '100%', paddingLeft: 33, paddingRight: searchTerm ? 32 : 12, paddingTop: 9, paddingBottom: 9, fontSize: 13, boxSizing: 'border-box' }} />
+                      {searchTerm && <button onClick={() => setSearchTerm('')} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.3)', lineHeight: 0, background: 'none' }}><X size={13} /></button>}
+                    </div>
+                    <select value={filterProject} onChange={e => setFilterProject(e.target.value)} className="tl-input" style={{ width: '100%', padding: '9px 12px', fontSize: 13, boxSizing: 'border-box' }}>
+                      <option value="">All Projects</option>
+                      {projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
+                    </select>
+                    <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="tl-input" style={{ width: '100%', padding: '9px 12px', fontSize: 13, boxSizing: 'border-box' }}>
+                      <option value="">All Status</option>
+                      <option value="To Do">To Do</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Review">Review</option>
+                      <option value="Done">Done</option>
+                    </select>
+                    {hasActiveFilters && (
+                      <button onClick={clearFilters} style={{ width: '100%', padding: '8px', fontSize: 12, fontWeight: 500, color: '#a78bfa', borderRadius: 10, background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)' }}>
+                        Clear all filters
+                      </button>
+                    )}
                   </div>
-                  <select value={filterProject} onChange={e => setFilterProject(e.target.value)} className="tl-input" style={{ width: '100%', padding: '9px 12px', fontSize: 13, boxSizing: 'border-box' }}>
-                    <option value="">All Projects</option>
-                    {projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
-                  </select>
-                  <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="tl-input" style={{ width: '100%', padding: '9px 12px', fontSize: 13, boxSizing: 'border-box' }}>
-                    <option value="">All Status</option>
-                    <option value="To Do">To Do</option>
-                    <option value="In Progress">In Progress</option>
-                    <option value="Review">Review</option>
-                    <option value="Done">Done</option>
-                  </select>
-                  {hasActiveFilters && (
-                    <button onClick={clearFilters} style={{ width: '100%', padding: '8px', fontSize: 12, fontWeight: 500, color: '#a78bfa', borderRadius: 10, background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)' }}>
-                      Clear all filters
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )}
 
           {/* ══════════════════════════════════════════════════════════════
-              DESKTOP TABLE
+              Only ONE of these renders at a time — driven by useIsDesktop(),
+              not CSS. This is the fix for the "task list shown twice" bug:
+              previously both the table and the cards lived in the DOM
+              simultaneously and a CSS media-query toggle decided visibility,
+              which could fail silently. Now only one ever mounts.
           ══════════════════════════════════════════════════════════════ */}
-          <div className="tl-desktop">
+          {isDesktop ? (
             <div className="tl-surface">
               <table className="tl-table">
                 <thead>
@@ -529,118 +559,115 @@ export const TaskList: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          </div>
-
-          {/* ══════════════════════════════════════════════════════════════
-              MOBILE CARDS
-          ══════════════════════════════════════════════════════════════ */}
-          <div className="tl-mobile" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {loading && Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="tl-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <div className="tl-skel" style={{ height: 22, width: 54, borderRadius: 7 }} />
-                  <div className="tl-skel" style={{ height: 22, width: 80, borderRadius: 20 }} />
-                </div>
-                <div className="tl-skel" style={{ height: 16, width: '72%', marginBottom: 8 }} />
-                <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
-                  <div className="tl-skel" style={{ height: 12, width: 80 }} />
-                  <div className="tl-skel" style={{ height: 12, width: 48 }} />
-                </div>
-                <div className="tl-rule" />
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-                  {[0,1,2].map(k => <div key={k} className="tl-skel" style={{ height: 28, width: 28, borderRadius: 8 }} />)}
-                </div>
-              </div>
-            ))}
-
-            {!loading && tasks.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '48px 16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Search size={20} style={{ color: 'rgba(255,255,255,0.18)' }} />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {loading && Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="tl-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div className="tl-skel" style={{ height: 22, width: 54, borderRadius: 7 }} />
+                    <div className="tl-skel" style={{ height: 22, width: 80, borderRadius: 20 }} />
                   </div>
-                  <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13, margin: 0 }}>
-                    {hasActiveFilters ? 'No tasks match your filters' : 'No tasks yet'}
-                  </p>
-                  {hasActiveFilters && <button onClick={clearFilters} style={{ color: '#7c3aed', fontSize: 13, textDecoration: 'underline', background: 'none', cursor: 'pointer' }}>Clear filters</button>}
+                  <div className="tl-skel" style={{ height: 16, width: '72%', marginBottom: 8 }} />
+                  <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+                    <div className="tl-skel" style={{ height: 12, width: 80 }} />
+                    <div className="tl-skel" style={{ height: 12, width: 48 }} />
+                  </div>
+                  <div className="tl-rule" />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                    {[0,1,2].map(k => <div key={k} className="tl-skel" style={{ height: 28, width: 28, borderRadius: 8 }} />)}
+                  </div>
                 </div>
-              </div>
-            )}
+              ))}
 
-            {!loading && (
-              <AnimatePresence>
-                {tasks.map(task => {
-                  const canDel     = canDeleteGlobal || (task.assigner as any)?._id?.toString() === user?._id;
-                  const isDeleting = deletingId === task._id;
-                  return (
-                    <motion.div
-                      key={task._id}
-                      className="tl-card"
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: isDeleting ? 0.3 : 1, y: 0 }}
-                      exit={{ opacity: 0, height: 0, padding: 0 }}
-                      transition={{ duration: 0.18 }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                        <span className={`tl-num${task.taskNumber == null ? ' legacy' : ''}`}>
-                          {task.taskNumber != null ? `TM${String(task.taskNumber).padStart(4, '0')}` : '—'}
-                        </span>
-                        <span className={`tl-status ${STATUS_STYLES[task.status] || 'bg-zinc-500/10 text-zinc-400'}`}>
-                          <span className="tl-status-dot" style={{ background: STATUS_DOT[task.status] || 'rgba(255,255,255,0.3)' }} />
-                          {task.status}
-                        </span>
-                      </div>
+              {!loading && tasks.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '48px 16px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Search size={20} style={{ color: 'rgba(255,255,255,0.18)' }} />
+                    </div>
+                    <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13, margin: 0 }}>
+                      {hasActiveFilters ? 'No tasks match your filters' : 'No tasks yet'}
+                    </p>
+                    {hasActiveFilters && <button onClick={clearFilters} style={{ color: '#7c3aed', fontSize: 13, textDecoration: 'underline', background: 'none', cursor: 'pointer' }}>Clear filters</button>}
+                  </div>
+                </div>
+              )}
 
-                      <p style={{ color: '#fff', fontWeight: 600, fontSize: 14, margin: '0 0 8px', lineHeight: 1.4 }}>
-                        {task.title}
-                      </p>
-
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginBottom: 12 }}>
-                        {(task.project as any)?.name && (
-                          <span style={{ color: 'rgba(255,255,255,0.38)', fontSize: 12 }}>{(task.project as any).name}</span>
-                        )}
-                        {task.assigner && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                            <span style={{
-                              width: 16, height: 16, borderRadius: '50%',
-                              background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
-                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: 8, fontWeight: 700, color: '#fff', flexShrink: 0,
-                            }}>
-                              {getInitials((task.assigner as any)?.name)}
-                            </span>
-                            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
-                              {(task.assigner as any)?.name}
-                            </span>
+              {!loading && (
+                <AnimatePresence>
+                  {tasks.map(task => {
+                    const canDel     = canDeleteGlobal || (task.assigner as any)?._id?.toString() === user?._id;
+                    const isDeleting = deletingId === task._id;
+                    return (
+                      <motion.div
+                        key={task._id}
+                        className="tl-card"
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: isDeleting ? 0.3 : 1, y: 0 }}
+                        exit={{ opacity: 0, height: 0, padding: 0 }}
+                        transition={{ duration: 0.18 }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                          <span className={`tl-num${task.taskNumber == null ? ' legacy' : ''}`}>
+                            {task.taskNumber != null ? `TM${String(task.taskNumber).padStart(4, '0')}` : '—'}
                           </span>
-                        )}
-                        <span style={{ fontSize: 11, fontWeight: 700 }} className={PRIORITY_STYLES[task.priority] || ''}>
-                          {task.priority}
-                        </span>
-                        {task.endDate && (
-                          <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
-                            Due {new Date(task.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          <span className={`tl-status ${STATUS_STYLES[task.status] || 'bg-zinc-500/10 text-zinc-400'}`}>
+                            <span className="tl-status-dot" style={{ background: STATUS_DOT[task.status] || 'rgba(255,255,255,0.3)' }} />
+                            {task.status}
                           </span>
-                        )}
-                      </div>
+                        </div>
 
-                      <div className="tl-rule" />
+                        <p style={{ color: '#fff', fontWeight: 600, fontSize: 14, margin: '0 0 8px', lineHeight: 1.4 }}>
+                          {task.title}
+                        </p>
 
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        <button onClick={() => navigate(`/tasks/${task._id}`)}      className="tl-btn"     title="View"><Eye    size={15} /></button>
-                        <button onClick={() => navigate(`/tasks/${task._id}/edit`)} className="tl-btn"     title="Edit"><Edit   size={15} /></button>
-                        {canDel && (
-                          <button onClick={() => handleDelete(task._id)} disabled={isDeleting} className="tl-btn del" title="Delete">
-                            <Trash2 size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
-            )}
-          </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginBottom: 12 }}>
+                          {(task.project as any)?.name && (
+                            <span style={{ color: 'rgba(255,255,255,0.38)', fontSize: 12 }}>{(task.project as any).name}</span>
+                          )}
+                          {task.assigner && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              <span style={{
+                                width: 16, height: 16, borderRadius: '50%',
+                                background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: 8, fontWeight: 700, color: '#fff', flexShrink: 0,
+                              }}>
+                                {getInitials((task.assigner as any)?.name)}
+                              </span>
+                              <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
+                                {(task.assigner as any)?.name}
+                              </span>
+                            </span>
+                          )}
+                          <span style={{ fontSize: 11, fontWeight: 700 }} className={PRIORITY_STYLES[task.priority] || ''}>
+                            {task.priority}
+                          </span>
+                          {task.endDate && (
+                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+                              Due {new Date(task.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="tl-rule" />
+
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <button onClick={() => navigate(`/tasks/${task._id}`)}      className="tl-btn"     title="View"><Eye    size={15} /></button>
+                          <button onClick={() => navigate(`/tasks/${task._id}/edit`)} className="tl-btn"     title="Edit"><Edit   size={15} /></button>
+                          {canDel && (
+                            <button onClick={() => handleDelete(task._id)} disabled={isDeleting} className="tl-btn del" title="Delete">
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+              )}
+            </div>
+          )}
 
         </div>
       </div>

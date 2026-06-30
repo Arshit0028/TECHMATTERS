@@ -1,25 +1,65 @@
 // src/components/Dashboard/ActivityList.tsx
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Eye, Calendar, Loader2, CheckCircle2, PlayCircle, Repeat } from 'lucide-react';
+import {
+  Plus,
+  Eye,
+  Pencil,
+  Trash2,
+  Calendar,
+  Loader2,
+  CheckCircle2,
+  PlayCircle,
+  Repeat,
+  Lock,
+} from 'lucide-react';
 import api from '../../api/client';
 import type { Activity } from '../types/index';
+
+const LOCKED_STATUSES = ['Submitted', 'Completed'];
+
+// Builds "YYYY-MM" options for the last 12 months plus the current month,
+// newest first — enough range for a typical reporting workflow without
+// needing a full date-picker component.
+const buildMonthOptions = () => {
+  const options: { value: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    options.push({ value, label });
+  }
+  return options;
+};
+
+const MONTH_OPTIONS = buildMonthOptions();
+
+// Shared select styling — fixes white-on-white text by forcing a visible
+// text color and dark option background.
+const selectClass =
+  'bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 focus:outline-none [&>option]:bg-[#0d0e16] [&>option]:text-white';
 
 export const ActivityList: React.FC = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [monthFilter, setMonthFilter] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchActivities();
-  }, []);
+  }, [monthFilter]);
 
   const fetchActivities = async () => {
+    setLoading(true);
     try {
-      const res = await api.get('/activities');
+      const res = await api.get('/activities', {
+        params: monthFilter ? { month: monthFilter } : {},
+      });
       setActivities(res.data);
     } catch (err) {
       console.error(err);
@@ -31,8 +71,7 @@ export const ActivityList: React.FC = () => {
   const updateStatus = async (id: string, newStatus: 'In Progress' | 'Completed') => {
     setUpdatingId(id);
     try {
-      const res = await api.put(`/activities/${id}`, { status: newStatus });
-      // Optimistic update
+      await api.put(`/activities/${id}`, { status: newStatus });
       setActivities(prev =>
         prev.map(act => (act._id === id ? { ...act, status: newStatus } : act))
       );
@@ -41,6 +80,20 @@ export const ActivityList: React.FC = () => {
       alert('Failed to update status');
     } finally {
       setUpdatingId(null);
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    setDeletingId(id);
+    try {
+      await api.delete(`/activities/${id}`);
+      setActivities(prev => prev.filter(act => act._id !== id));
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete activity');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -100,14 +153,27 @@ export const ActivityList: React.FC = () => {
           </button>
         </motion.div>
 
-        <div className="relative mb-6">
+        <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <input
             type="text"
             placeholder="Search activities..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 pl-12 text-white placeholder:text-gray-400 focus:border-violet-400 focus:outline-none"
+            className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white placeholder:text-gray-400 focus:border-violet-400 focus:outline-none"
           />
+
+          <select
+            value={monthFilter}
+            onChange={e => setMonthFilter(e.target.value)}
+            className={selectClass}
+          >
+            <option value="">All Months</option>
+            {MONTH_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         {loading ? (
@@ -117,9 +183,11 @@ export const ActivityList: React.FC = () => {
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filtered.map(activity => {
-              const isUpdating = updatingId === activity._id;
+              const isUpdatingThis = updatingId === activity._id;
+              const isDeletingThis = deletingId === activity._id;
               const isCompleted = activity.status === 'Completed';
               const isInProgress = activity.status === 'In Progress';
+              const isLocked = LOCKED_STATUSES.includes(activity.status);
 
               return (
                 <motion.div
@@ -131,9 +199,11 @@ export const ActivityList: React.FC = () => {
                   <div className="flex justify-between items-start mb-4">
                     <div className="font-semibold text-lg leading-tight">{activity.name}</div>
                     <span
-                      className={`px-3 py-1 text-xs rounded-full font-medium ${
+                      className={`px-3 py-1 text-xs rounded-full font-medium whitespace-nowrap ${
                         isCompleted
                           ? 'bg-emerald-500/20 text-emerald-400'
+                          : activity.status === 'Submitted'
+                          ? 'bg-violet-500/20 text-violet-400'
                           : isInProgress
                           ? 'bg-blue-500/20 text-blue-400'
                           : 'bg-amber-500/20 text-amber-400'
@@ -147,38 +217,71 @@ export const ActivityList: React.FC = () => {
 
                   <div className="flex items-center justify-between text-xs text-gray-400 mb-5">
                     {renderSchedule(activity)}
+                  </div>
+
+                  {/* CRUD action row — View always available; Edit shown
+                     only when not locked, with a lock icon swapped in when
+                     it is, so the restriction is visible rather than the
+                     button just disappearing. Delete always available. */}
+                  <div className="flex items-center gap-2 mb-4 pb-4 border-b border-white/10">
                     <button
                       onClick={() => navigate(`/activities/${activity._id}`)}
-                      className="flex items-center gap-1 text-violet-400 hover:text-violet-300"
+                      className="flex-1 flex items-center justify-center gap-1.5 text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 py-2.5 rounded-xl transition-all"
                     >
                       <Eye size={14} /> View
                     </button>
-                  </div>
 
-                  {/* Quick Status Buttons */}
-                  <div className="flex gap-2">
-                    {!isInProgress && !isCompleted && (
+                    {isLocked ? (
                       <button
-                        onClick={() => updateStatus(activity._id, 'In Progress')}
-                        disabled={isUpdating}
-                        className="flex-1 flex items-center justify-center gap-2 bg-blue-600/90 hover:bg-blue-600 text-white text-sm font-medium py-3 px-4 rounded-2xl transition-all"
+                        disabled
+                        title="Locked — Submitted/Completed activities can't be edited"
+                        className="flex-1 flex items-center justify-center gap-1.5 text-sm text-gray-500 bg-white/5 py-2.5 rounded-xl cursor-not-allowed"
                       >
-                        {isUpdating ? <Loader2 className="animate-spin" size={16} /> : <PlayCircle size={16} />}
-                        Mark Ongoing
+                        <Lock size={14} /> Locked
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => navigate(`/activities/${activity._id}/edit`)}
+                        className="flex-1 flex items-center justify-center gap-1.5 text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 py-2.5 rounded-xl transition-all"
+                      >
+                        <Pencil size={14} /> Edit
                       </button>
                     )}
 
-                    {!isCompleted && (
+                    <button
+                      onClick={() => handleDelete(activity._id, activity.name)}
+                      disabled={isDeletingThis}
+                      className="flex items-center justify-center gap-1.5 text-sm text-red-400 hover:text-red-300 bg-white/5 hover:bg-red-500/10 py-2.5 px-3 rounded-xl transition-all disabled:opacity-50"
+                    >
+                      {isDeletingThis ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
+                    </button>
+                  </div>
+
+                  {/* Quick Status Buttons — hidden once locked, since
+                     Submitted/Completed activities can't be edited further. */}
+                  {!isLocked && (
+                    <div className="flex gap-2">
+                      {!isInProgress && (
+                        <button
+                          onClick={() => updateStatus(activity._id, 'In Progress')}
+                          disabled={isUpdatingThis}
+                          className="flex-1 flex items-center justify-center gap-2 bg-blue-600/90 hover:bg-blue-600 text-white text-sm font-medium py-3 px-4 rounded-2xl transition-all"
+                        >
+                          {isUpdatingThis ? <Loader2 className="animate-spin" size={16} /> : <PlayCircle size={16} />}
+                          Mark Ongoing
+                        </button>
+                      )}
+
                       <button
                         onClick={() => updateStatus(activity._id, 'Completed')}
-                        disabled={isUpdating}
+                        disabled={isUpdatingThis}
                         className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium py-3 px-4 rounded-2xl transition-all"
                       >
-                        {isUpdating ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
+                        {isUpdatingThis ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
                         Mark Completed
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </motion.div>
               );
             })}

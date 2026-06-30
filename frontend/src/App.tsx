@@ -23,10 +23,13 @@ const UserList              = lazy(() => import('./components/Admin/UserList').t
 const HRDashboard           = lazy(() => import('./components/Hr/HRDashboard').then(m => ({ default: m.HRDashboard })));
 const ProjectForm           = lazy(() => import('./components/Projects/ProjectForm').then(m => ({ default: m.ProjectForm })));
 const ProjectList           = lazy(() => import('./components/Projects/ProjectList').then(m => ({ default: m.ProjectList })));
+const ProjectView           = lazy(() => import('./components/Projects/ProjectView').then(m => ({ default: m.ProjectView })));
 const TaskList              = lazy(() => import('./components/Tasks/TaskList').then(m => ({ default: m.TaskList })));
 const TaskForm              = lazy(() => import('./components/Tasks/TaskForm').then(m => ({ default: m.TaskForm })));
+const TaskView              = lazy(() => import('./components/Tasks/TaskView').then(m => ({ default: m.TaskView })));
 const ActivityList          = lazy(() => import('./components/Activities/ActivityList').then(m => ({ default: m.ActivityList })));
 const ActivityForm          = lazy(() => import('./components/Activities/ActivityForm').then(m => ({ default: m.ActivityForm })));
+const ActivityView          = lazy(() => import('./components/Activities/Activityview').then(m => ({ default: m.ActivityView })));
 const ReimbursementList     = lazy(() => import('./components/Reimbursements/ReimbursementList').then(m => ({ default: m.ReimbursementList })));
 const ReimbursementForm     = lazy(() => import('./components/Reimbursements/ReimbursementForm').then(m => ({ default: m.ReimbursementForm })));
 const ReimbursementDetail   = lazy(() => import('./components/Reimbursements/ReimbursementDetail').then(m => ({ default: m.ReimbursementDetail })));
@@ -135,13 +138,15 @@ const AppRoutes: React.FC = () => {
             <Route path="/users/:id"          element={<ProtectedRoute><UserForm /></ProtectedRoute>} />
             <Route path="/projects"           element={<ProtectedRoute><ProjectList /></ProtectedRoute>} />
             <Route path="/projects/new"       element={<ProtectedRoute><ProjectForm /></ProtectedRoute>} />
-            <Route path="/projects/:id"       element={<ProtectedRoute><ProjectForm /></ProtectedRoute>} />
+            <Route path="/projects/:id"       element={<ProtectedRoute><ProjectView /></ProtectedRoute>} />
             <Route path="/tasks"              element={<ProtectedRoute><TaskList /></ProtectedRoute>} />
             <Route path="/tasks/new"          element={<ProtectedRoute><TaskForm /></ProtectedRoute>} />
-            <Route path="/tasks/:id"          element={<ProtectedRoute><TaskForm /></ProtectedRoute>} />
+            <Route path="/tasks/:id"          element={<ProtectedRoute><TaskView /></ProtectedRoute>} />
+            <Route path="/tasks/:id/edit"     element={<ProtectedRoute><TaskForm /></ProtectedRoute>} />
             <Route path="/activities"         element={<ProtectedRoute><ActivityList /></ProtectedRoute>} />
             <Route path="/activities/new"     element={<ProtectedRoute><ActivityForm /></ProtectedRoute>} />
-            <Route path="/activities/:id"     element={<ProtectedRoute><ActivityForm /></ProtectedRoute>} />
+            <Route path="/activities/:id"     element={<ProtectedRoute><ActivityView /></ProtectedRoute>} />
+            <Route path="/activities/:id/edit" element={<ProtectedRoute><ActivityForm /></ProtectedRoute>} />
             <Route path="/reimbursements"     element={<ProtectedRoute><ReimbursementList /></ProtectedRoute>} />
             <Route path="/reimbursements/new" element={<ProtectedRoute><ReimbursementForm /></ProtectedRoute>} />
             <Route path="/reimbursements/:id" element={<ProtectedRoute><ReimbursementDetail /></ProtectedRoute>} />

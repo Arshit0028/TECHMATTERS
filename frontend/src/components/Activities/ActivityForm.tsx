@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { createActivity, updateActivity } from '../../api/client';
-import { Save, X, Loader2 } from 'lucide-react';
+import { Save, X, Loader2, Lock } from 'lucide-react';
 
 const WEEKDAYS: { value: string; label: string }[] = [
   { value: 'Sun', label: 'Sun' },
@@ -15,9 +15,21 @@ const WEEKDAYS: { value: string; label: string }[] = [
   { value: 'Sat', label: 'Sat' },
 ];
 
+// Statuses that lock an activity from further edits — mirrors the
+// server-side LOCKED_STATUSES check in routes/activities.js.
+const LOCKED_STATUSES = ['Submitted', 'Completed'];
+
+// Shared select styling — fixes the white-on-white text issue by forcing
+// a visible text color and a dark option background (native <option>
+// elements ignore most parent styling, so background-color is set
+// explicitly here too).
+const selectClass =
+  'w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 outline-none [&>option]:bg-[#0d0e16] [&>option]:text-white';
+
 export const ActivityForm: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const isEditMode = Boolean(id);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -32,6 +44,8 @@ export const ActivityForm: React.FC = () => {
   const [reminderDays, setReminderDays] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [loadingActivity, setLoadingActivity] = useState(isEditMode);
+  const [isLocked, setIsLocked] = useState(false);
 
   const isDaily = formData.activityType === 'Daily';
   const isWeekly = formData.activityType === 'Weekly';
@@ -44,6 +58,16 @@ export const ActivityForm: React.FC = () => {
     try {
       const res = await (await import('../../api/client')).getActivity(id!);
       const act = res.data;
+
+      // Editing a Submitted/Completed activity is disabled entirely —
+      // redirect straight to the read-only view page instead of letting
+      // the user land on a form they can't submit.
+      if (LOCKED_STATUSES.includes(act.status)) {
+        setIsLocked(true);
+        navigate(`/activities/${id}`, { replace: true });
+        return;
+      }
+
       setFormData({
         name: act.name || '',
         description: act.description || '',
@@ -53,9 +77,11 @@ export const ActivityForm: React.FC = () => {
         priority: act.priority || 'Medium',
         status: act.status || 'Pending',
       });
-      setReminderDays([]);
+      setReminderDays(act.reminderDays || []);
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoadingActivity(false);
     }
   };
 
@@ -102,13 +128,27 @@ export const ActivityForm: React.FC = () => {
         await createActivity(data);
       }
       navigate('/activities');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Error saving activity. Please check the console.');
+      const msg = err?.response?.data?.msg || 'Error saving activity. Please check the console.';
+      alert(msg);
     } finally {
       setSubmitting(false);
     }
   };
+
+  if (loadingActivity) {
+    return (
+      <div className="min-h-screen bg-[#07080e] text-white p-8 flex items-center justify-center">
+        <Loader2 className="animate-spin" size={28} />
+      </div>
+    );
+  }
+
+  if (isLocked) {
+    // Should already have redirected — this is just a safety fallback.
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-[#07080e] text-white p-8">
@@ -118,7 +158,7 @@ export const ActivityForm: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8"
         >
-          <h1 className="text-3xl font-bold mb-8">{id ? 'Edit Activity' : 'New Activity'}</h1>
+          <h1 className="text-3xl font-bold mb-8">{isEditMode ? 'Edit Activity' : 'New Activity'}</h1>
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <input
@@ -143,7 +183,7 @@ export const ActivityForm: React.FC = () => {
                 <select
                   value={formData.activityType}
                   onChange={(e) => handleTypeChange(e.target.value)}
-                  className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 outline-none"
+                  className={selectClass}
                 >
                   <option value="One Time">One Time</option>
                   <option value="Daily">Daily</option>
@@ -157,7 +197,7 @@ export const ActivityForm: React.FC = () => {
                 <select
                   value={formData.priority}
                   onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 outline-none"
+                  className={selectClass}
                 >
                   <option value="Low">Low</option>
                   <option value="Medium">Medium</option>
@@ -248,7 +288,7 @@ export const ActivityForm: React.FC = () => {
                 className="flex-1 flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed py-4 rounded-2xl font-semibold"
               >
                 {submitting ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
-                {id ? 'Update Activity' : 'Create Activity'}
+                {isEditMode ? 'Update Activity' : 'Create Activity'}
               </button>
 
               <button

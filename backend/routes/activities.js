@@ -14,6 +14,11 @@ const { getLocalDateParts } = require("../utils/dateHelpers");
 // Roles that can READ ALL activities (read-only for HR).
 const READ_ALL_ROLES = [...ADMIN_ROLES, "hr"];
 
+// Statuses that lock an activity from further edits once reached.
+// Delete is intentionally NOT restricted here per product decision —
+// only editing is blocked.
+const LOCKED_STATUSES = ["Submitted", "Completed"];
+
 // ── Multer setup for attachments ─────────────────────────────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -136,6 +141,30 @@ router.put("/:id", auth, upload.array("attachments", 10), async (req, res) => {
       return res.status(403).json({ msg: "Not authorized" });
     }
 
+    // Once Submitted or Completed, the activity is locked from further
+    // edits — server-side enforcement mirrors the frontend lock so the
+    // restriction can't be bypassed via direct API calls. The one
+    // exception: a status transition INTO "Submitted" or "Completed" is
+    // still allowed (e.g. the Mark Completed / Submit action itself),
+    // since that's the action that locks it, not an edit after the fact.
+    const isAlreadyLocked = LOCKED_STATUSES.includes(activity.status);
+    const isOnlyStatusChange =
+      status !== undefined &&
+      name === undefined &&
+      description === undefined &&
+      startDate === undefined &&
+      endDate === undefined &&
+      activityType === undefined &&
+      priority === undefined &&
+      reminderDays === undefined &&
+      (!req.files || req.files.length === 0);
+
+    if (isAlreadyLocked && !isOnlyStatusChange) {
+      return res.status(403).json({
+        msg: "This activity is locked and can no longer be edited.",
+      });
+    }
+
     if (name) activity.name = name.trim();
     if (description !== undefined) activity.description = description;
     if (startDate !== undefined) activity.startDate = startDate || null;
@@ -183,20 +212,57 @@ router.put("/:id", auth, upload.array("attachments", 10), async (req, res) => {
   }
 });
 
+// ── Delete Activity ───────────────────────────────────────────────────
+// No status restriction on delete per product decision — owner can delete
+// an activity at any status, including Submitted/Completed.
+router.delete("/:id", auth, async (req, res) => {
+  try {
+    const activity = await Activity.findById(req.params.id);
+    if (!activity) return res.status(404).json({ msg: "Activity not found" });
+
+    if (activity.assignee.toString() !== req.user.id) {
+      return res.status(403).json({ msg: "Not authorized" });
+    }
+
+    await activity.deleteOne();
+    res.json({ msg: "Activity deleted" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Server error" });
+  }
+});
+
 // ── Get all activities (for list) ────────────────────────────────────
 // Read-all roles (admins, HR): see everyone's activities, optionally scoped to
 //   a single employee via ?assignee=<userId> (used by Employee Reports).
 // Everyone else: only their own activities.
+// Optional ?month=YYYY-MM filters activities whose startDate (or endDate,
+// for ranges spanning the month) falls within that month.
 router.get("/", auth, async (req, res) => {
   try {
     const isReadAll = READ_ALL_ROLES.includes(req.user.accessLevel);
-    const { assignee } = req.query;
+    const { assignee, month } = req.query;
 
     const filter = {};
     if (!isReadAll) {
       filter.assignee = req.user.id;
     } else if (assignee && mongoose.Types.ObjectId.isValid(assignee)) {
       filter.assignee = assignee;
+    }
+
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [year, mon] = month.split("-").map(Number);
+      const monthStart = new Date(year, mon - 1, 1, 0, 0, 0, 0);
+      const monthEnd = new Date(year, mon, 0, 23, 59, 59, 999);
+
+      filter.$or = [
+        { startDate: { $gte: monthStart, $lte: monthEnd } },
+        { endDate: { $gte: monthStart, $lte: monthEnd } },
+        {
+          startDate: { $lte: monthStart },
+          endDate: { $gte: monthEnd },
+        },
+      ];
     }
 
     const activities = await Activity.find(filter)

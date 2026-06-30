@@ -101,9 +101,15 @@ export interface Activity {
   endDate?: string;
   activityType: 'Daily' | 'One Time' | 'Weekly' | 'Monthly' | 'Yearly';
   priority: 'Low' | 'Medium' | 'High';
-  status: 'Pending' | 'In Progress' | 'Completed';
+  // 'Submitted' added on top of existing values — once an activity is
+  // Submitted (to manager) or Completed, editing is disabled in the UI.
+  status: 'Pending' | 'In Progress' | 'Submitted' | 'Completed';
   attachments: Attachment[];
   dependencies: Activity[];
+  // Only populated when activityType === 'Weekly'. Short-day values
+  // (Sun..Sat) the activity recurs on — see ActivityForm/ActivityList/
+  // ActivityView for usage.
+  reminderDays?: string[];
   createdAt: string;
   updatedAt: string;
 }
