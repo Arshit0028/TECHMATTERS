@@ -1,3 +1,4 @@
+// models/Activity.js
 const mongoose = require("mongoose");
 
 const attachmentSchema = new mongoose.Schema(
@@ -48,6 +49,31 @@ const ActivitySchema = new mongoose.Schema(
       enum: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
       default: [],
     },
+
+    // ── Recurring Activity fields (additive — default false/empty) ──────────
+    // When isRecurring is true, occurrences are stored in the separate
+    // RecurringOccurrence collection (keyed by this Activity's _id).
+    // Non-recurring activities are completely unaffected (isRecurring
+    // defaults to false, totalOccurrences defaults to 0).
+    isRecurring: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    // Which weekdays this recurring activity runs on.
+    // e.g. ["Mon","Wed","Fri"]. Only meaningful when isRecurring===true.
+    weekdays: {
+      type: [String],
+      enum: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+      default: [],
+    },
+    // Total scheduled occurrences computed on creation — stored here for
+    // fast stats queries without needing to count occurrence docs each time.
+    totalOccurrences: {
+      type: Number,
+      default: 0,
+    },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },
@@ -55,11 +81,11 @@ const ActivitySchema = new mongoose.Schema(
 );
 
 // ── Production indexes ────────────────────────────────────────────────────────
-// Activities are queried by assignee (employee dashboards / monthly reports),
-// by the parent task, and filtered by status. These cover the hot paths.
 ActivitySchema.index({ assignee: 1, status: 1 });
 ActivitySchema.index({ assignee: 1, startDate: 1 });
 ActivitySchema.index({ task: 1 });
 ActivitySchema.index({ endDate: 1 });
+// Fast lookup of all recurring activities for a user
+ActivitySchema.index({ assignee: 1, isRecurring: 1 });
 
 module.exports = mongoose.model("Activity", ActivitySchema);

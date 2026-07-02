@@ -3,28 +3,40 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { createActivity, updateActivity } from '../../api/client';
-import { Save, X, Loader2, Lock } from 'lucide-react';
+import { Save, X, Loader2, Lock, RefreshCw, Info } from 'lucide-react';
 
 const WEEKDAYS: { value: string; label: string }[] = [
-  { value: 'Sun', label: 'Sun' },
   { value: 'Mon', label: 'Mon' },
   { value: 'Tue', label: 'Tue' },
   { value: 'Wed', label: 'Wed' },
   { value: 'Thu', label: 'Thu' },
   { value: 'Fri', label: 'Fri' },
   { value: 'Sat', label: 'Sat' },
+  { value: 'Sun', label: 'Sun' },
 ];
 
-// Statuses that lock an activity from further edits — mirrors the
-// server-side LOCKED_STATUSES check in routes/activities.js.
 const LOCKED_STATUSES = ['Submitted', 'Completed'];
 
-// Shared select styling — fixes the white-on-white text issue by forcing
-// a visible text color and a dark option background (native <option>
-// elements ignore most parent styling, so background-color is set
-// explicitly here too).
 const selectClass =
   'w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 outline-none [&>option]:bg-[#0d0e16] [&>option]:text-white';
+
+// Mirrors the server-side occurrence count so the employee sees a live
+// preview before submitting.
+const WEEKDAY_JS: Record<string, number> = {
+  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+function countOccurrences(start: string, end: string, days: string[]): number {
+  if (!start || !end || days.length === 0) return 0;
+  const set = new Set(days.map(d => WEEKDAY_JS[d]));
+  let count = 0;
+  const cur = new Date(start + 'T00:00:00Z');
+  const endD = new Date(end + 'T00:00:00Z');
+  while (cur <= endD) {
+    if (set.has(cur.getUTCDay())) count++;
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return count;
+}
 
 export const ActivityForm: React.FC = () => {
   const { id } = useParams();
@@ -47,8 +59,17 @@ export const ActivityForm: React.FC = () => {
   const [loadingActivity, setLoadingActivity] = useState(isEditMode);
   const [isLocked, setIsLocked] = useState(false);
 
+  // ── Recurring state ────────────────────────────────────────────────
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [weekdays, setWeekdays] = useState<string[]>([]);
+  // Recurring activities cannot have their schedule changed after creation
+  const [recurringLocked, setRecurringLocked] = useState(false);
+
   const isDaily = formData.activityType === 'Daily';
   const isWeekly = formData.activityType === 'Weekly';
+  const occurrencePreview = isRecurring
+    ? countOccurrences(formData.startDate, formData.endDate, weekdays)
+    : 0;
 
   useEffect(() => {
     if (id) loadActivity();
@@ -59,9 +80,6 @@ export const ActivityForm: React.FC = () => {
       const res = await (await import('../../api/client')).getActivity(id!);
       const act = res.data;
 
-      // Editing a Submitted/Completed activity is disabled entirely —
-      // redirect straight to the read-only view page instead of letting
-      // the user land on a form they can't submit.
       if (LOCKED_STATUSES.includes(act.status)) {
         setIsLocked(true);
         navigate(`/activities/${id}`, { replace: true });
@@ -78,6 +96,14 @@ export const ActivityForm: React.FC = () => {
         status: act.status || 'Pending',
       });
       setReminderDays(act.reminderDays || []);
+
+      // Restore recurring state — but lock schedule editing since
+      // changing weekdays/dates after occurrence generation is not supported.
+      if ((act as any).isRecurring) {
+        setIsRecurring(true);
+        setWeekdays((act as any).weekdays || []);
+        setRecurringLocked(true); // can't change schedule on existing recurring activity
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -86,15 +112,14 @@ export const ActivityForm: React.FC = () => {
   };
 
   const toggleDay = (day: string) => {
-    setReminderDays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    if (recurringLocked) return;
+    setWeekdays(prev =>
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day],
     );
   };
 
-  // When switching type away from Daily/Weekly, clear the fields that no
-  // longer apply so stale values don't get submitted silently.
   const handleTypeChange = (newType: string) => {
-    setFormData((prev) => ({
+    setFormData(prev => ({
       ...prev,
       activityType: newType,
       ...(newType === 'Daily' ? { startDate: '', endDate: '' } : {}),
@@ -104,6 +129,23 @@ export const ActivityForm: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate recurring-specific fields
+    if (isRecurring && !recurringLocked) {
+      if (weekdays.length === 0) {
+        alert('Please select at least one weekday for the recurring activity.');
+        return;
+      }
+      if (!formData.startDate || !formData.endDate) {
+        alert('Start and end date are required for recurring activities.');
+        return;
+      }
+      if (occurrencePreview === 0) {
+        alert('No occurrences fall within the selected date range and weekdays. Widen the date range.');
+        return;
+      }
+    }
+
     setSubmitting(true);
 
     const data = new FormData();
@@ -114,12 +156,17 @@ export const ActivityForm: React.FC = () => {
     data.append('activityType', formData.activityType);
     data.append('priority', formData.priority);
     data.append('status', formData.status);
+    if (isWeekly) data.append('reminderDays', JSON.stringify(reminderDays));
 
-    if (isWeekly) {
-      data.append('reminderDays', JSON.stringify(reminderDays));
+    // Recurring fields — only sent on create, not edit
+    if (!isEditMode) {
+      data.append('isRecurring', String(isRecurring));
+      if (isRecurring) {
+        data.append('weekdays', JSON.stringify(weekdays));
+      }
     }
 
-    attachments.forEach((file) => data.append('attachments', file));
+    attachments.forEach(file => data.append('attachments', file));
 
     try {
       if (id) {
@@ -130,8 +177,7 @@ export const ActivityForm: React.FC = () => {
       navigate('/activities');
     } catch (err: any) {
       console.error(err);
-      const msg = err?.response?.data?.msg || 'Error saving activity. Please check the console.';
-      alert(msg);
+      alert(err?.response?.data?.msg || 'Error saving activity.');
     } finally {
       setSubmitting(false);
     }
@@ -145,10 +191,7 @@ export const ActivityForm: React.FC = () => {
     );
   }
 
-  if (isLocked) {
-    // Should already have redirected — this is just a safety fallback.
-    return null;
-  }
+  if (isLocked) return null;
 
   return (
     <div className="min-h-screen bg-[#07080e] text-white p-8">
@@ -161,28 +204,134 @@ export const ActivityForm: React.FC = () => {
           <h1 className="text-3xl font-bold mb-8">{isEditMode ? 'Edit Activity' : 'New Activity'}</h1>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+
+            {/* Name */}
             <input
               placeholder="Activity Name *"
               value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
               className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white placeholder:text-gray-400 focus:border-violet-400 outline-none"
               required
             />
 
+            {/* Description */}
             <textarea
               placeholder="Description"
               value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              onChange={e => setFormData({ ...formData, description: e.target.value })}
               rows={4}
               className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white placeholder:text-gray-400 focus:border-violet-400 outline-none"
             />
 
+            {/* Recurring toggle — only shown on create for non-daily activities */}
+            {!isEditMode && !isDaily && (
+              <button
+                type="button"
+                onClick={() => { setIsRecurring(v => !v); setWeekdays([]); }}
+                className={`w-full flex items-center gap-3 px-5 py-4 rounded-2xl border text-sm font-medium transition-all ${
+                  isRecurring
+                    ? 'bg-violet-600/20 border-violet-500/50 text-violet-300'
+                    : 'bg-white/5 border-white/20 text-gray-400 hover:border-white/40'
+                }`}
+              >
+                <RefreshCw size={16} className={isRecurring ? 'text-violet-400' : 'text-gray-500'} />
+                {isRecurring ? 'Recurring Activity (ON)' : 'Make this a Recurring Activity'}
+                <span className="ml-auto text-xs opacity-60">
+                  {isRecurring ? 'Tracks completion per scheduled date' : 'Tap to enable'}
+                </span>
+              </button>
+            )}
+
+            {/* Recurring schedule: weekdays + date range */}
+            {isRecurring && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="space-y-4 overflow-hidden"
+              >
+                {recurringLocked && (
+                  <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-2xl px-4 py-3">
+                    <Lock size={13} />
+                    Schedule is locked — weekdays and dates can't be changed after creation.
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-xs text-gray-400 block mb-2">
+                    Repeats on these days *
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {WEEKDAYS.map(day => {
+                      const active = weekdays.includes(day.value);
+                      return (
+                        <button
+                          key={day.value}
+                          type="button"
+                          onClick={() => toggleDay(day.value)}
+                          disabled={recurringLocked}
+                          className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${
+                            active
+                              ? 'bg-violet-600 border-violet-500 text-white'
+                              : 'bg-white/10 border-white/20 text-gray-300 hover:border-violet-400'
+                          } ${recurringLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                          {day.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Date range for recurring */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-2">Start Date *</label>
+                    <input
+                      type="date"
+                      value={formData.startDate}
+                      onChange={e => setFormData({ ...formData, startDate: e.target.value })}
+                      disabled={recurringLocked}
+                      required={isRecurring}
+                      className={`w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 outline-none ${recurringLocked ? 'opacity-60' : ''}`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-2">End Date *</label>
+                    <input
+                      type="date"
+                      value={formData.endDate}
+                      onChange={e => setFormData({ ...formData, endDate: e.target.value })}
+                      min={formData.startDate || undefined}
+                      disabled={recurringLocked}
+                      required={isRecurring}
+                      className={`w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 outline-none ${recurringLocked ? 'opacity-60' : ''}`}
+                    />
+                  </div>
+                </div>
+
+                {/* Occurrence preview */}
+                {occurrencePreview > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex items-center gap-3 bg-violet-500/10 border border-violet-500/20 rounded-2xl px-5 py-3"
+                  >
+                    <Info size={15} className="text-violet-400 flex-shrink-0" />
+                    <p className="text-sm text-violet-300">
+                      <span className="font-bold text-white">{occurrencePreview} occurrence{occurrencePreview !== 1 ? 's' : ''}</span> will be scheduled on {weekdays.join(', ')}.
+                    </p>
+                  </motion.div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Activity Type + Priority (existing, unchanged) */}
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <label className="text-xs text-gray-400 block mb-2">Activity Type</label>
                 <select
                   value={formData.activityType}
-                  onChange={(e) => handleTypeChange(e.target.value)}
+                  onChange={e => handleTypeChange(e.target.value)}
                   className={selectClass}
                 >
                   <option value="One Time">One Time</option>
@@ -191,12 +340,11 @@ export const ActivityForm: React.FC = () => {
                   <option value="Monthly">Monthly</option>
                 </select>
               </div>
-
               <div>
                 <label className="text-xs text-gray-400 block mb-2">Priority</label>
                 <select
                   value={formData.priority}
-                  onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                  onChange={e => setFormData({ ...formData, priority: e.target.value })}
                   className={selectClass}
                 >
                   <option value="Low">Low</option>
@@ -206,9 +354,9 @@ export const ActivityForm: React.FC = () => {
               </div>
             </div>
 
-            {/* Daily: no dates at all. Weekly: optional bounding range +
-               day-of-week picker below. One Time / Monthly: unchanged. */}
-            {!isDaily && (
+            {/* Dates (existing, only shown when NOT recurring — recurring
+                has its own date pickers above) */}
+            {!isRecurring && !isDaily && (
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <label className="text-xs text-gray-400 block mb-2">
@@ -217,7 +365,7 @@ export const ActivityForm: React.FC = () => {
                   <input
                     type="date"
                     value={formData.startDate}
-                    onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                    onChange={e => setFormData({ ...formData, startDate: e.target.value })}
                     className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 outline-none"
                   />
                 </div>
@@ -228,32 +376,37 @@ export const ActivityForm: React.FC = () => {
                   <input
                     type="date"
                     value={formData.endDate}
-                    onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                    onChange={e => setFormData({ ...formData, endDate: e.target.value })}
                     className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 outline-none"
                   />
                 </div>
               </div>
             )}
 
-            {isDaily && (
+            {isDaily && !isRecurring && (
               <p className="text-xs text-gray-400 -mt-2">
                 Daily activities don't use start/end dates — you'll get a reminder every day until it's marked Completed.
               </p>
             )}
 
-            {isWeekly && (
+            {/* Weekly reminder days (existing, unchanged) */}
+            {isWeekly && !isRecurring && (
               <div>
-                <label className="text-xs text-gray-400 block mb-2">
-                  Repeats on these days *
-                </label>
+                <label className="text-xs text-gray-400 block mb-2">Repeats on these days *</label>
                 <div className="flex flex-wrap gap-2">
-                  {WEEKDAYS.map((day) => {
+                  {WEEKDAYS.map(day => {
                     const active = reminderDays.includes(day.value);
                     return (
                       <button
                         key={day.value}
                         type="button"
-                        onClick={() => toggleDay(day.value)}
+                        onClick={() =>
+                          setReminderDays(prev =>
+                            prev.includes(day.value)
+                              ? prev.filter(d => d !== day.value)
+                              : [...prev, day.value],
+                          )
+                        }
                         className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all ${
                           active
                             ? 'bg-violet-600 border-violet-500 text-white'
@@ -271,26 +424,27 @@ export const ActivityForm: React.FC = () => {
               </div>
             )}
 
+            {/* Attachments (unchanged) */}
             <div>
               <label className="text-xs text-gray-400 block mb-2">Attachments</label>
               <input
                 type="file"
                 multiple
-                onChange={(e) => setAttachments(Array.from(e.target.files || []))}
+                onChange={e => setAttachments(Array.from(e.target.files || []))}
                 className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 outline-none"
               />
             </div>
 
+            {/* Actions */}
             <div className="flex gap-4 pt-6">
               <button
                 type="submit"
-                disabled={submitting || (isWeekly && reminderDays.length === 0)}
+                disabled={submitting || (isWeekly && !isRecurring && reminderDays.length === 0)}
                 className="flex-1 flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed py-4 rounded-2xl font-semibold"
               >
                 {submitting ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
                 {isEditMode ? 'Update Activity' : 'Create Activity'}
               </button>
-
               <button
                 type="button"
                 onClick={() => navigate('/activities')}
