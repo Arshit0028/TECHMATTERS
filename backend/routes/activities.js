@@ -6,7 +6,7 @@ const multer = require("multer");
 const path = require("path");
 
 const Activity = require("../models/Activity");
-const RecurringOccurrence = require("../models/RecurringOccurrence");
+const RecurringOccurrence = require("../models/Recurringoccurrence");
 const Notification = require("../models/Notification");
 const auth = require("../middleware/auth");
 const { ADMIN_ROLES } = require("../middleware/permissions");
@@ -142,17 +142,13 @@ router.post("/", auth, upload.array("attachments", 10), async (req, res) => {
       const days =
         typeof weekdays === "string" ? JSON.parse(weekdays) : weekdays || [];
       if (!Array.isArray(days) || days.length === 0)
-        return res
-          .status(400)
-          .json({
-            msg: "At least one weekday is required for recurring activities",
-          });
+        return res.status(400).json({
+          msg: "At least one weekday is required for recurring activities",
+        });
       if (!startDate || !endDate)
-        return res
-          .status(400)
-          .json({
-            msg: "Start and end date are required for recurring activities",
-          });
+        return res.status(400).json({
+          msg: "Start and end date are required for recurring activities",
+        });
     }
 
     const parsedWeekdays = recurring
@@ -170,11 +166,9 @@ router.post("/", auth, upload.array("attachments", 10), async (req, res) => {
         parsedWeekdays,
       ).length;
       if (totalOccurrences === 0)
-        return res
-          .status(400)
-          .json({
-            msg: "No occurrences fall within the date range for the selected weekdays",
-          });
+        return res.status(400).json({
+          msg: "No occurrences fall within the date range for the selected weekdays",
+        });
     }
 
     const activity = new Activity({
