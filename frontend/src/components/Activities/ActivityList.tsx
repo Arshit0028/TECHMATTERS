@@ -1,4 +1,4 @@
-// src/components/Dashboard/ActivityList.tsx
+// src/components/Activities/ActivityList.tsx
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -8,7 +8,6 @@ import {
   AlertTriangle, Clock,
 } from 'lucide-react';
 import api from '../../api/client';
-import type { Activity } from '../types/index';
 
 const LOCKED_STATUSES = ['Submitted', 'Completed'];
 
@@ -28,7 +27,6 @@ const MONTH_OPTIONS = buildMonthOptions();
 const selectClass =
   'bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white focus:border-violet-400 focus:outline-none [&>option]:bg-[#0d0e16] [&>option]:text-white';
 
-// ── Recurring progress bar ────────────────────────────────────────────
 interface RecurringStats { total: number; completed: number; late: number; pending: number; }
 
 const RecurringProgressBar: React.FC<{ stats: RecurringStats }> = ({ stats }) => {
@@ -157,7 +155,6 @@ export const ActivityList: React.FC = () => {
     <div className="min-h-screen bg-[#07080e] text-white p-8">
       <div className="max-w-6xl mx-auto">
 
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -175,7 +172,6 @@ export const ActivityList: React.FC = () => {
           </button>
         </motion.div>
 
-        {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <input
             type="text"
@@ -196,7 +192,6 @@ export const ActivityList: React.FC = () => {
           </select>
         </div>
 
-        {/* List */}
         {loading ? (
           <div className="text-center py-12 text-gray-400">Loading activities...</div>
         ) : filtered.length === 0 ? (
@@ -221,7 +216,6 @@ export const ActivityList: React.FC = () => {
                     recurring ? 'border-violet-500/30' : 'border-white/10'
                   }`}
                 >
-                  {/* Title + status badge */}
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex items-center gap-2 min-w-0">
                       {recurring && <RefreshCw size={14} className="text-violet-400 flex-shrink-0" />}
@@ -242,7 +236,6 @@ export const ActivityList: React.FC = () => {
                     </span>
                   </div>
 
-                  {/* Recurring badge */}
                   {recurring && (
                     <span className="text-[10px] bg-violet-500/15 text-violet-300 border border-violet-500/20 px-2 py-0.5 rounded-full font-medium">
                       Recurring
@@ -253,17 +246,14 @@ export const ActivityList: React.FC = () => {
                     {activity.description || 'No description'}
                   </p>
 
-                  {/* Schedule line */}
                   <div className="text-xs text-gray-400 mb-4">
                     {renderSchedule(activity)}
                   </div>
 
-                  {/* Recurring progress bar */}
                   {recurring && stats && (
                     <RecurringProgressBar stats={stats} />
                   )}
 
-                  {/* CRUD actions */}
                   <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/10">
                     <button
                       onClick={() => navigate(`/activities/${activity._id}`)}
@@ -298,7 +288,6 @@ export const ActivityList: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Quick status buttons — only for non-recurring, non-locked */}
                   {!recurring && !isLocked && (
                     <div className="flex gap-2 mt-3">
                       {!isInProgress && (
@@ -324,7 +313,6 @@ export const ActivityList: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Recurring: nudge to View page for per-occurrence completion */}
                   {recurring && (
                     <button
                       onClick={() => navigate(`/activities/${activity._id}`)}
